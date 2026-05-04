@@ -1290,10 +1290,20 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   EnemyPrefab: {fileID: 4273299781251412507, guid: ff68321348738c94288bf6ad84873c2c, type: 3}
   ReaperPrefab: {fileID: 5545208887308343624, guid: 0aeeffcbdb90fbc498a8f681bfed1d20, type: 3}
-  ReaperSpawnTime: 600
-  SpawnInterval: 0.25
   SpawnDistance: 25
   RandomSeed: 1337
+  AerialArtilleryPrefab: {fileID: 4679082440980975953, guid: 48c30836d9f7d8f44b3a0db1516fd1b8, type: 3}
+  SwiftSwarmPrefab: {fileID: 5424416578555912542, guid: 90fbd9c78b222824cabe49cb065591e1, type: 3}
+  VolatileVanguardPrefab: {fileID: 8785729372594503702, guid: be767aa2438fde646af8a7393565a32a, type: 3}
+  RollingHazardPrefab: {fileID: 0}
+  StasisOverlordPrefab: {fileID: 0}
+  LightningStrikerPrefab: {fileID: 0}
+  HeavyLeaperPrefab: {fileID: 7600937568669482155, guid: 0f7ce4069c15aaa4f8ea1e2f98c7c167, type: 3}
+  EnemyProjectilePrefab: {fileID: 42743470278448070, guid: 5abad809c221eec458f19dd5aa3b87f6, type: 3}
+  AerialArtilleryCount: 5
+  SwiftSwarmCount: 12
+  VolatileVanguardCount: 5
+  HeavyLeaperCount: 5
 --- !u!4 &1418316971
 Transform:
   m_ObjectHideFlags: 0

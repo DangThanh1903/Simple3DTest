@@ -10,6 +10,7 @@ using Unity.Transforms;
 namespace TMG.Survivors
 {
     public struct EnemyTag : IComponentData {}
+    public struct ChasePlayerTag : IComponentData {}
 
     public enum EnemyBehaviorType : byte
     {
@@ -30,6 +31,59 @@ namespace TMG.Survivors
 
     public struct RollingHazardTag : IComponentData {}
     public struct LightningStrikerTag : IComponentData {}
+    public struct EnemyProjectileTag : IComponentData {}
+    public struct InitializeEnemyProjectileFlag : IComponentData {}
+
+    public struct AerialArtilleryData : IComponentData
+    {
+        public Entity ProjectilePrefab;
+        public float MinimumDistance;
+        public float PreferredDistance;
+        public float ShootCooldown;
+    }
+
+    public struct AerialArtilleryState : IComponentData
+    {
+        public float ShootTimer;
+    }
+
+    public struct VolatileVanguardData : IComponentData
+    {
+        public float CountdownTime;
+        public float ExplosionRadius;
+        public int ExplosionDamage;
+    }
+
+    public struct VolatileVanguardState : IComponentData
+    {
+        public float RemainingTime;
+        public float BlinkTimer;
+        public float BaseScale;
+        public bool BlinkExpanded;
+    }
+
+    public enum HeavyLeaperPhase : byte
+    {
+        Waiting,
+        Leaping
+    }
+
+    public struct HeavyLeaperData : IComponentData
+    {
+        public float LeapInterval;
+        public float LeapDuration;
+        public float SlamRadius;
+        public int SlamDamage;
+    }
+
+    public struct HeavyLeaperState : IComponentData
+    {
+        public HeavyLeaperPhase Phase;
+        public float Timer;
+        public float3 StartPosition;
+        public float3 TargetPosition;
+        public float BaseScale;
+    }
 
     public struct EnemyAttackData : IComponentData
     {
@@ -54,6 +108,23 @@ namespace TMG.Survivors
         public int AttackDamage;
         public float CooldownTime;
         public GameObject GemPrefab;
+
+        [Header("Aerial Artillery")]
+        public GameObject AerialProjectilePrefab;
+        public float AerialMinimumDistance = 7f;
+        public float AerialPreferredDistance = 10f;
+        public float AerialShootCooldown = 1.25f;
+
+        [Header("Volatile Vanguard")]
+        public float VolatileCountdownTime = 5f;
+        public float VolatileExplosionRadius = 3f;
+        public int VolatileExplosionDamage = 25;
+
+        [Header("Heavy Leaper")]
+        public float HeavyLeapInterval = 1.5f;
+        public float HeavyLeapDuration = 0.65f;
+        public float HeavySlamRadius = 3.5f;
+        public int HeavySlamDamage = 20;
         
         private class Baker : Baker<EnemyAuthoring>
         {
@@ -61,7 +132,7 @@ namespace TMG.Survivors
             {
                 var entity = GetEntity(TransformUsageFlags.Dynamic);
                 AddComponent<EnemyTag>(entity);
-                AddBehaviorTag(entity, authoring.BehaviorType);
+                AddBehaviorTag(entity, authoring);
                 AddComponent(entity, new EnemyAttackData
                 {
                     HitPoints = authoring.AttackDamage,
@@ -75,34 +146,80 @@ namespace TMG.Survivors
                 });
             }
 
-            private void AddBehaviorTag(Entity entity, EnemyBehaviorType behaviorType)
+            private void AddBehaviorTag(Entity entity, EnemyAuthoring authoring)
             {
-                switch (behaviorType)
+                switch (authoring.BehaviorType)
                 {
                     case EnemyBehaviorType.MeleeChaser:
                         AddComponent<MeleeChaserTag>(entity);
+                        AddComponent<ChasePlayerTag>(entity);
                         break;
                     case EnemyBehaviorType.SwiftSwarm:
                         AddComponent<SwiftSwarmTag>(entity);
+                        AddComponent<ChasePlayerTag>(entity);
                         break;
                     case EnemyBehaviorType.AerialArtillery:
                         AddComponent<AerialArtilleryTag>(entity);
+                        AddComponent(entity, new AerialArtilleryData
+                        {
+                            ProjectilePrefab = GetOptionalEntity(authoring.AerialProjectilePrefab),
+                            MinimumDistance = math.max(0f, authoring.AerialMinimumDistance),
+                            PreferredDistance = math.max(authoring.AerialMinimumDistance, authoring.AerialPreferredDistance),
+                            ShootCooldown = math.max(0.1f, authoring.AerialShootCooldown)
+                        });
+                        AddComponent(entity, new AerialArtilleryState
+                        {
+                            ShootTimer = 0f
+                        });
                         break;
                     case EnemyBehaviorType.VolatileVanguard:
                         AddComponent<VolatileVanguardTag>(entity);
+                        AddComponent(entity, new VolatileVanguardData
+                        {
+                            CountdownTime = math.max(0.1f, authoring.VolatileCountdownTime),
+                            ExplosionRadius = math.max(0.1f, authoring.VolatileExplosionRadius),
+                            ExplosionDamage = math.max(1, authoring.VolatileExplosionDamage)
+                        });
+                        AddComponent(entity, new VolatileVanguardState
+                        {
+                            RemainingTime = math.max(0.1f, authoring.VolatileCountdownTime),
+                            BlinkTimer = 0f,
+                            BaseScale = math.max(0.1f, authoring.transform.localScale.x),
+                            BlinkExpanded = false
+                        });
                         break;
                     case EnemyBehaviorType.HeavyLeaper:
                         AddComponent<HeavyLeaperTag>(entity);
+                        AddComponent(entity, new HeavyLeaperData
+                        {
+                            LeapInterval = math.max(0.1f, authoring.HeavyLeapInterval),
+                            LeapDuration = math.max(0.1f, authoring.HeavyLeapDuration),
+                            SlamRadius = math.max(0.1f, authoring.HeavySlamRadius),
+                            SlamDamage = math.max(1, authoring.HeavySlamDamage)
+                        });
+                        AddComponent(entity, new HeavyLeaperState
+                        {
+                            Phase = HeavyLeaperPhase.Waiting,
+                            Timer = math.max(0.1f, authoring.HeavyLeapInterval),
+                            StartPosition = float3.zero,
+                            TargetPosition = float3.zero,
+                            BaseScale = math.max(0.1f, authoring.transform.localScale.x)
+                        });
                         break;
                     case EnemyBehaviorType.StasisOverlord:
                         AddComponent<StasisOverlordTag>(entity);
                         break;
                 }
             }
+
+            private Entity GetOptionalEntity(GameObject prefab)
+            {
+                return prefab == null ? Entity.Null : GetEntity(prefab, TransformUsageFlags.Dynamic);
+            }
         }
     }
 
-    public partial struct MeleeChaserMoveSystem : ISystem
+    public partial struct ChasePlayerMoveSystem : ISystem
     {
         public void OnCreate(ref SystemState state)
         {
@@ -114,7 +231,7 @@ namespace TMG.Survivors
             var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
             var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position.xy;
 
-            var moveToPlayerJob = new MeleeChaserMoveJob
+            var moveToPlayerJob = new ChasePlayerMoveJob
             {
                 PlayerPosition = playerPosition
             };
@@ -124,8 +241,8 @@ namespace TMG.Survivors
     }
 
     [BurstCompile]
-    [WithAll(typeof(MeleeChaserTag))]
-    public partial struct MeleeChaserMoveJob : IJobEntity
+    [WithAll(typeof(ChasePlayerTag))]
+    public partial struct ChasePlayerMoveJob : IJobEntity
     {
         public float2 PlayerPosition;
         

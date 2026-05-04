@@ -82,6 +82,7 @@ namespace TMG.Survivors
             var attackJob = new PlasmaBlastAttackJob
             {
                 PlasmaBlastLookup = SystemAPI.GetComponentLookup<PlasmaBlastData>(true),
+                EnemyProjectileLookup = SystemAPI.GetComponentLookup<EnemyProjectileTag>(true),
                 EnemyLookup = SystemAPI.GetComponentLookup<EnemyTag>(true),
                 DamageBufferLookup = SystemAPI.GetBufferLookup<DamageThisFrame>(),
                 DestroyEntityLookup = SystemAPI.GetComponentLookup<DestroyEntityFlag>()
@@ -95,6 +96,7 @@ namespace TMG.Survivors
     public struct PlasmaBlastAttackJob : ITriggerEventsJob
     {
         [ReadOnly] public ComponentLookup<PlasmaBlastData> PlasmaBlastLookup;
+        [ReadOnly] public ComponentLookup<EnemyProjectileTag> EnemyProjectileLookup;
         [ReadOnly] public ComponentLookup<EnemyTag> EnemyLookup;
         public BufferLookup<DamageThisFrame> DamageBufferLookup;
         public ComponentLookup<DestroyEntityFlag> DestroyEntityLookup;
@@ -119,11 +121,79 @@ namespace TMG.Survivors
                 return;
             }
 
+            if (EnemyProjectileLookup.HasComponent(plasmaBlastEntity)) return;
+
             var attackDamage = PlasmaBlastLookup[plasmaBlastEntity].AttackDamage;
             var enemyDamageBuffer = DamageBufferLookup[enemyEntity];
             enemyDamageBuffer.Add(new DamageThisFrame { Value = attackDamage });
 
             DestroyEntityLookup.SetComponentEnabled(plasmaBlastEntity, true);
+        }
+    }
+
+    [UpdateInGroup(typeof(PhysicsSystemGroup))]
+    [UpdateAfter(typeof(PhysicsSimulationGroup))]
+    [UpdateBefore(typeof(AfterPhysicsSystemGroup))]
+    public partial struct EnemyProjectileAttackSystem : ISystem
+    {
+        public void OnCreate(ref SystemState state)
+        {
+            state.RequireForUpdate<SimulationSingleton>();
+        }
+
+        public void OnUpdate(ref SystemState state)
+        {
+            var attackJob = new EnemyProjectileAttackJob
+            {
+                ProjectileLookup = SystemAPI.GetComponentLookup<PlasmaBlastData>(true),
+                EnemyProjectileLookup = SystemAPI.GetComponentLookup<EnemyProjectileTag>(true),
+                PlayerLookup = SystemAPI.GetComponentLookup<PlayerTag>(true),
+                DamageBufferLookup = SystemAPI.GetBufferLookup<DamageThisFrame>(),
+                DestroyEntityLookup = SystemAPI.GetComponentLookup<DestroyEntityFlag>()
+            };
+
+            var simulationSingleton = SystemAPI.GetSingleton<SimulationSingleton>();
+            state.Dependency = attackJob.Schedule(simulationSingleton, state.Dependency);
+        }
+    }
+
+    public struct EnemyProjectileAttackJob : ITriggerEventsJob
+    {
+        [ReadOnly] public ComponentLookup<PlasmaBlastData> ProjectileLookup;
+        [ReadOnly] public ComponentLookup<EnemyProjectileTag> EnemyProjectileLookup;
+        [ReadOnly] public ComponentLookup<PlayerTag> PlayerLookup;
+        public BufferLookup<DamageThisFrame> DamageBufferLookup;
+        public ComponentLookup<DestroyEntityFlag> DestroyEntityLookup;
+
+        public void Execute(TriggerEvent triggerEvent)
+        {
+            Entity projectileEntity;
+            Entity playerEntity;
+
+            if (ProjectileLookup.HasComponent(triggerEvent.EntityA) &&
+                EnemyProjectileLookup.HasComponent(triggerEvent.EntityA) &&
+                PlayerLookup.HasComponent(triggerEvent.EntityB))
+            {
+                projectileEntity = triggerEvent.EntityA;
+                playerEntity = triggerEvent.EntityB;
+            }
+            else if (ProjectileLookup.HasComponent(triggerEvent.EntityB) &&
+                     EnemyProjectileLookup.HasComponent(triggerEvent.EntityB) &&
+                     PlayerLookup.HasComponent(triggerEvent.EntityA))
+            {
+                projectileEntity = triggerEvent.EntityB;
+                playerEntity = triggerEvent.EntityA;
+            }
+            else
+            {
+                return;
+            }
+
+            var attackDamage = ProjectileLookup[projectileEntity].AttackDamage;
+            var playerDamageBuffer = DamageBufferLookup[playerEntity];
+            playerDamageBuffer.Add(new DamageThisFrame { Value = attackDamage });
+
+            DestroyEntityLookup.SetComponentEnabled(projectileEntity, true);
         }
     }
 }
