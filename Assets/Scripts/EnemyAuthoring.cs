@@ -11,6 +11,26 @@ namespace TMG.Survivors
 {
     public struct EnemyTag : IComponentData {}
 
+    public enum EnemyBehaviorType : byte
+    {
+        MeleeChaser = 0,
+        SwiftSwarm = 1,
+        AerialArtillery = 2,
+        VolatileVanguard = 3,
+        HeavyLeaper = 4,
+        StasisOverlord = 5
+    }
+
+    public struct MeleeChaserTag : IComponentData {}
+    public struct SwiftSwarmTag : IComponentData {}
+    public struct AerialArtilleryTag : IComponentData {}
+    public struct VolatileVanguardTag : IComponentData {}
+    public struct HeavyLeaperTag : IComponentData {}
+    public struct StasisOverlordTag : IComponentData {}
+
+    public struct RollingHazardTag : IComponentData {}
+    public struct LightningStrikerTag : IComponentData {}
+
     public struct EnemyAttackData : IComponentData
     {
         public int HitPoints;
@@ -30,6 +50,7 @@ namespace TMG.Survivors
     [RequireComponent(typeof(CharacterAuthoring))]
     public class EnemyAuthoring : MonoBehaviour
     {
+        public EnemyBehaviorType BehaviorType = EnemyBehaviorType.MeleeChaser;
         public int AttackDamage;
         public float CooldownTime;
         public GameObject GemPrefab;
@@ -40,6 +61,7 @@ namespace TMG.Survivors
             {
                 var entity = GetEntity(TransformUsageFlags.Dynamic);
                 AddComponent<EnemyTag>(entity);
+                AddBehaviorTag(entity, authoring.BehaviorType);
                 AddComponent(entity, new EnemyAttackData
                 {
                     HitPoints = authoring.AttackDamage,
@@ -52,10 +74,35 @@ namespace TMG.Survivors
                     Value = GetEntity(authoring.GemPrefab, TransformUsageFlags.Dynamic)
                 });
             }
+
+            private void AddBehaviorTag(Entity entity, EnemyBehaviorType behaviorType)
+            {
+                switch (behaviorType)
+                {
+                    case EnemyBehaviorType.MeleeChaser:
+                        AddComponent<MeleeChaserTag>(entity);
+                        break;
+                    case EnemyBehaviorType.SwiftSwarm:
+                        AddComponent<SwiftSwarmTag>(entity);
+                        break;
+                    case EnemyBehaviorType.AerialArtillery:
+                        AddComponent<AerialArtilleryTag>(entity);
+                        break;
+                    case EnemyBehaviorType.VolatileVanguard:
+                        AddComponent<VolatileVanguardTag>(entity);
+                        break;
+                    case EnemyBehaviorType.HeavyLeaper:
+                        AddComponent<HeavyLeaperTag>(entity);
+                        break;
+                    case EnemyBehaviorType.StasisOverlord:
+                        AddComponent<StasisOverlordTag>(entity);
+                        break;
+                }
+            }
         }
     }
 
-    public partial struct EnemyMoveToPlayerSystem : ISystem
+    public partial struct MeleeChaserMoveSystem : ISystem
     {
         public void OnCreate(ref SystemState state)
         {
@@ -67,7 +114,7 @@ namespace TMG.Survivors
             var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
             var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position.xy;
 
-            var moveToPlayerJob = new EnemyMoveToPlayerJob
+            var moveToPlayerJob = new MeleeChaserMoveJob
             {
                 PlayerPosition = playerPosition
             };
@@ -77,15 +124,15 @@ namespace TMG.Survivors
     }
 
     [BurstCompile]
-    [WithAll(typeof(EnemyTag))]
-    public partial struct EnemyMoveToPlayerJob : IJobEntity
+    [WithAll(typeof(MeleeChaserTag))]
+    public partial struct MeleeChaserMoveJob : IJobEntity
     {
         public float2 PlayerPosition;
         
         private void Execute(ref CharacterMoveDirection direction, in LocalTransform transform)
         {
             var vectorToPlayer = PlayerPosition - transform.Position.xy;
-            direction.Value = math.normalize(vectorToPlayer);
+            direction.Value = math.lengthsq(vectorToPlayer) > 0.0001f ? math.normalize(vectorToPlayer) : float2.zero;
         }
     }
 
