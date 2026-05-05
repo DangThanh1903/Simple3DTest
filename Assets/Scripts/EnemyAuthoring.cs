@@ -6,6 +6,8 @@ using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Physics.Systems;
 using Unity.Transforms;
+using Unity.Jobs;
+using Unity.Collections.LowLevel.Unsafe;
 
 namespace TMG.Survivors
 {
@@ -30,9 +32,30 @@ namespace TMG.Survivors
     public struct StasisOverlordTag : IComponentData {}
 
     public struct RollingHazardTag : IComponentData {}
+    public struct InitializeRollingHazardFlag : IComponentData {}
     public struct LightningStrikerTag : IComponentData {}
     public struct EnemyProjectileTag : IComponentData {}
     public struct InitializeEnemyProjectileFlag : IComponentData {}
+
+    public struct RollingHazardData : IComponentData
+    {
+        public float Lifetime;
+        public float MoveSpeed;
+        public float KnockbackSpeed;
+        public float KnockbackDuration;
+    }
+
+    public struct RollingHazardState : IComponentData
+    {
+        public float RemainingTime;
+        public float2 Direction;
+    }
+
+    public struct PlayerKnockback : IComponentData
+    {
+        public float RemainingTime;
+        public float2 Velocity;
+    }
 
     public struct AerialArtilleryData : IComponentData
     {
@@ -85,6 +108,43 @@ namespace TMG.Survivors
         public float BaseScale;
     }
 
+    public struct StasisOverlordData : IComponentData
+    {
+        public float FreezeRange;
+        public float FreezeDuration;
+        public float CastCooldown;
+    }
+
+    public struct StasisOverlordState : IComponentData
+    {
+        public float CastTimer;
+        public float BaseScale;
+    }
+
+    public enum LightningStrikerPhase : byte
+    {
+        Flying,
+        Locking,
+        Striking
+    }
+
+    public struct LightningStrikerData : IComponentData
+    {
+        public float FlyDuration;
+        public float FlySpeed;
+        public float LockDuration;
+        public float StrikeRadius;
+        public int StrikeDamage;
+    }
+
+    public struct LightningStrikerState : IComponentData
+    {
+        public LightningStrikerPhase Phase;
+        public float Timer;
+        public float3 LockedTargetPosition;
+        public float BaseScale;
+    }
+
     public struct EnemyAttackData : IComponentData
     {
         public int HitPoints;
@@ -125,6 +185,11 @@ namespace TMG.Survivors
         public float HeavyLeapDuration = 0.65f;
         public float HeavySlamRadius = 3.5f;
         public int HeavySlamDamage = 20;
+
+        [Header("Stasis Overlord")]
+        public float StasisFreezeRange = 8f;
+        public float StasisFreezeDuration = 2f;
+        public float StasisCastCooldown = 4f;
         
         private class Baker : Baker<EnemyAuthoring>
         {
@@ -174,6 +239,7 @@ namespace TMG.Survivors
                         break;
                     case EnemyBehaviorType.VolatileVanguard:
                         AddComponent<VolatileVanguardTag>(entity);
+                        AddComponent<ChasePlayerTag>(entity);
                         AddComponent(entity, new VolatileVanguardData
                         {
                             CountdownTime = math.max(0.1f, authoring.VolatileCountdownTime),
@@ -208,6 +274,18 @@ namespace TMG.Survivors
                         break;
                     case EnemyBehaviorType.StasisOverlord:
                         AddComponent<StasisOverlordTag>(entity);
+                        AddComponent<ChasePlayerTag>(entity);
+                        AddComponent(entity, new StasisOverlordData
+                        {
+                            FreezeRange = math.max(0.1f, authoring.StasisFreezeRange),
+                            FreezeDuration = math.max(0.1f, authoring.StasisFreezeDuration),
+                            CastCooldown = math.max(0.1f, authoring.StasisCastCooldown)
+                        });
+                        AddComponent(entity, new StasisOverlordState
+                        {
+                            CastTimer = 1f,
+                            BaseScale = math.max(0.1f, authoring.transform.localScale.x)
+                        });
                         break;
                 }
             }
@@ -221,35 +299,226 @@ namespace TMG.Survivors
 
     public partial struct ChasePlayerMoveSystem : ISystem
     {
+        private EntityQuery _chaseQuery;
+        private const float SpatialHashCellSize = 1.75f;
+        private const float SeparationRadius = 1.25f;
+        private const float SeparationWeight = 1.35f;
+
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<PlayerTag>();
+            _chaseQuery = SystemAPI.QueryBuilder()
+                .WithAll<ChasePlayerTag, CharacterMoveDirection, LocalTransform>()
+                .Build();
         }
 
         public void OnUpdate(ref SystemState state)
         {
+            var entityCount = _chaseQuery.CalculateEntityCount();
+            if (entityCount == 0)
+            {
+                return;
+            }
+
             var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
             var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position.xy;
+            var entities = _chaseQuery.ToEntityArray(Allocator.TempJob);
+            var transforms = _chaseQuery.ToComponentDataArray<LocalTransform>(Allocator.TempJob);
+            var positions = new NativeArray<float2>(entityCount, Allocator.TempJob);
+            var hashAndIndices = new NativeArray<SpatialHashAndIndex>(entityCount, Allocator.TempJob);
 
-            var moveToPlayerJob = new ChasePlayerMoveJob
+            var buildHashJob = new BuildChaseSpatialHashJob
             {
-                PlayerPosition = playerPosition
+                Transforms = transforms,
+                Positions = positions,
+                HashAndIndices = hashAndIndices,
+                CellSize = SpatialHashCellSize
             };
 
-            state.Dependency = moveToPlayerJob.ScheduleParallel(state.Dependency);
+            var buildHandle = buildHashJob.Schedule(entityCount, 64, state.Dependency);
+            var sortHandle = new SortChaseSpatialHashJob
+            {
+                HashAndIndices = hashAndIndices
+            }.Schedule(buildHandle);
+
+            var moveJob = new ChasePlayerSpatialMoveJob
+            {
+                Entities = entities,
+                Positions = positions,
+                HashAndIndices = hashAndIndices,
+                DirectionLookup = SystemAPI.GetComponentLookup<CharacterMoveDirection>(),
+                PlayerPosition = playerPosition,
+                CellSize = SpatialHashCellSize,
+                SeparationRadius = SeparationRadius,
+                SeparationWeight = SeparationWeight
+            };
+
+            var moveHandle = moveJob.Schedule(entityCount, 64, sortHandle);
+            var disposeEntityAndTransformHandle = JobHandle.CombineDependencies(
+                entities.Dispose(moveHandle),
+                transforms.Dispose(moveHandle));
+            var disposeSpatialDataHandle = JobHandle.CombineDependencies(
+                positions.Dispose(moveHandle),
+                hashAndIndices.Dispose(moveHandle));
+            var disposeHandle = JobHandle.CombineDependencies(
+                disposeEntityAndTransformHandle,
+                disposeSpatialDataHandle);
+
+            state.Dependency = disposeHandle;
         }
     }
 
     [BurstCompile]
-    [WithAll(typeof(ChasePlayerTag))]
-    public partial struct ChasePlayerMoveJob : IJobEntity
+    public struct BuildChaseSpatialHashJob : IJobParallelFor
     {
-        public float2 PlayerPosition;
-        
-        private void Execute(ref CharacterMoveDirection direction, in LocalTransform transform)
+        [ReadOnly] public NativeArray<LocalTransform> Transforms;
+        public NativeArray<float2> Positions;
+        public NativeArray<SpatialHashAndIndex> HashAndIndices;
+        public float CellSize;
+
+        public void Execute(int index)
         {
-            var vectorToPlayer = PlayerPosition - transform.Position.xy;
-            direction.Value = math.lengthsq(vectorToPlayer) > 0.0001f ? math.normalize(vectorToPlayer) : float2.zero;
+            var position = Transforms[index].Position.xy;
+            Positions[index] = position;
+            HashAndIndices[index] = new SpatialHashAndIndex
+            {
+                Hash = SpatialHashUtility.Hash(SpatialHashUtility.GridPosition(position, CellSize)),
+                Index = index
+            };
+        }
+    }
+
+    [BurstCompile]
+    public struct SortChaseSpatialHashJob : IJob
+    {
+        public NativeArray<SpatialHashAndIndex> HashAndIndices;
+
+        public void Execute()
+        {
+            HashAndIndices.Sort();
+        }
+    }
+
+    [BurstCompile]
+    public struct ChasePlayerSpatialMoveJob : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<Entity> Entities;
+        [ReadOnly] public NativeArray<float2> Positions;
+        [ReadOnly] public NativeArray<SpatialHashAndIndex> HashAndIndices;
+        [NativeDisableParallelForRestriction] public ComponentLookup<CharacterMoveDirection> DirectionLookup;
+        public float2 PlayerPosition;
+        public float CellSize;
+        public float SeparationRadius;
+        public float SeparationWeight;
+
+        public void Execute(int index)
+        {
+            var position = Positions[index];
+            var toPlayer = PlayerPosition - position;
+            var chaseDirection = math.lengthsq(toPlayer) > 0.0001f ? math.normalize(toPlayer) : float2.zero;
+            var separation = GetSeparation(index, position);
+            var desiredDirection = chaseDirection + separation * SeparationWeight;
+
+            DirectionLookup[Entities[index]] = new CharacterMoveDirection
+            {
+                Value = math.lengthsq(desiredDirection) > 0.0001f ? math.normalize(desiredDirection) : float2.zero
+            };
+        }
+
+        private float2 GetSeparation(int selfIndex, float2 position)
+        {
+            var separation = float2.zero;
+            var radiusSq = SeparationRadius * SeparationRadius;
+            var minGridPos = SpatialHashUtility.GridPosition(position - SeparationRadius, CellSize);
+            var maxGridPos = SpatialHashUtility.GridPosition(position + SeparationRadius, CellSize);
+
+            for (var x = minGridPos.x; x <= maxGridPos.x; x++)
+            {
+                for (var y = minGridPos.y; y <= maxGridPos.y; y++)
+                {
+                    var hash = SpatialHashUtility.Hash(new int2(x, y));
+                    var startIndex = SpatialHashUtility.BinarySearchFirst(HashAndIndices, hash);
+                    if (startIndex < 0)
+                    {
+                        continue;
+                    }
+
+                    for (var sortedIndex = startIndex;
+                         sortedIndex < HashAndIndices.Length && HashAndIndices[sortedIndex].Hash == hash;
+                         sortedIndex++)
+                    {
+                        var neighborIndex = HashAndIndices[sortedIndex].Index;
+                        if (neighborIndex == selfIndex)
+                        {
+                            continue;
+                        }
+
+                        var awayFromNeighbor = position - Positions[neighborIndex];
+                        var distanceSq = math.lengthsq(awayFromNeighbor);
+                        if (distanceSq > 0.0001f && distanceSq < radiusSq)
+                        {
+                            separation += awayFromNeighbor / distanceSq;
+                        }
+                    }
+                }
+            }
+
+            return separation;
+        }
+    }
+
+    public struct SpatialHashAndIndex : System.IComparable<SpatialHashAndIndex>
+    {
+        public int Hash;
+        public int Index;
+
+        public int CompareTo(SpatialHashAndIndex other)
+        {
+            return Hash.CompareTo(other.Hash);
+        }
+    }
+
+    public static class SpatialHashUtility
+    {
+        public static int2 GridPosition(float2 position, float cellSize)
+        {
+            return new int2(math.floor(position / cellSize));
+        }
+
+        public static int Hash(int2 gridPosition)
+        {
+            unchecked
+            {
+                return gridPosition.x * 73856093 ^ gridPosition.y * 19349663;
+            }
+        }
+
+        public static int BinarySearchFirst(NativeArray<SpatialHashAndIndex> sortedHashAndIndices, int hash)
+        {
+            var left = 0;
+            var right = sortedHashAndIndices.Length - 1;
+            var result = -1;
+
+            while (left <= right)
+            {
+                var mid = (left + right) / 2;
+                var midHash = sortedHashAndIndices[mid].Hash;
+                if (midHash == hash)
+                {
+                    result = mid;
+                    right = mid - 1;
+                }
+                else if (midHash < hash)
+                {
+                    left = mid + 1;
+                }
+                else
+                {
+                    right = mid - 1;
+                }
+            }
+
+            return result;
         }
     }
 

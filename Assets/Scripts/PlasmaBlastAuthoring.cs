@@ -4,6 +4,8 @@ using Unity.Entities;
 using Unity.Physics;
 using Unity.Physics.Systems;
 using Unity.Transforms;
+using Unity.Burst;
+using Unity.Mathematics;
 
 namespace TMG.Survivors
 {
@@ -49,14 +51,15 @@ namespace TMG.Survivors
 
     public partial struct MovePlasmaBlastSystem : ISystem
     {
+        public void OnCreate(ref SystemState state)
+        {
+            state.RequireForUpdate<PhysicsWorldSingleton>();
+        }
+
         public void OnUpdate(ref SystemState state)
         {
             var deltaTime = SystemAPI.Time.DeltaTime;
-            foreach (var (transform, data) in SystemAPI.Query<RefRW<LocalTransform>, PlasmaBlastData>())
-            {
-                transform.ValueRW.Position += transform.ValueRO.Right() * data.MoveSpeed * deltaTime;
-            }
-            
+
             // Destroy Plasma Blast After Time
             foreach (var (timer, entity) in SystemAPI.Query<RefRW<PlasmaBlastExpirationTimer>>().WithPresent<DestroyEntityFlag>().WithEntityAccess())
             {
@@ -64,136 +67,123 @@ namespace TMG.Survivors
                 if (timer.ValueRO.Value > 0) continue;
                 SystemAPI.SetComponentEnabled<DestroyEntityFlag>(entity, true);
             }
-        }
-    }
 
-    [UpdateInGroup(typeof(PhysicsSystemGroup))]
-    [UpdateAfter(typeof(PhysicsSimulationGroup))]
-    [UpdateBefore(typeof(AfterPhysicsSystemGroup))]
-    public partial struct PlasmaBlastAttackSystem : ISystem
-    {
-        public void OnCreate(ref SystemState state)
-        {
-            state.RequireForUpdate<SimulationSingleton>();
-        }
+            var physicsWorld = SystemAPI.GetSingleton<PhysicsWorldSingleton>().PhysicsWorld;
+            var ecb = new EntityCommandBuffer(Allocator.TempJob);
 
-        public void OnUpdate(ref SystemState state)
-        {
-            var attackJob = new PlasmaBlastAttackJob
+            var raycastJob = new PlasmaBlastRaycastMoveJob
             {
-                PlasmaBlastLookup = SystemAPI.GetComponentLookup<PlasmaBlastData>(true),
+                DeltaTime = deltaTime,
+                PhysicsWorld = physicsWorld,
                 EnemyProjectileLookup = SystemAPI.GetComponentLookup<EnemyProjectileTag>(true),
                 EnemyLookup = SystemAPI.GetComponentLookup<EnemyTag>(true),
-                DamageBufferLookup = SystemAPI.GetBufferLookup<DamageThisFrame>(),
-                DestroyEntityLookup = SystemAPI.GetComponentLookup<DestroyEntityFlag>()
+                PlayerLookup = SystemAPI.GetComponentLookup<PlayerTag>(true),
+                DestroyEntityLookup = SystemAPI.GetComponentLookup<DestroyEntityFlag>(true),
+                CommandBuffer = ecb.AsParallelWriter()
             };
 
-            var simulationSingleton = SystemAPI.GetSingleton<SimulationSingleton>();
-            state.Dependency = attackJob.Schedule(simulationSingleton, state.Dependency);
+            state.Dependency = raycastJob.ScheduleParallel(state.Dependency);
+            state.Dependency.Complete();
+
+            ecb.Playback(state.EntityManager);
+            ecb.Dispose();
         }
     }
 
-    public struct PlasmaBlastAttackJob : ITriggerEventsJob
+    [BurstCompile]
+    public partial struct PlasmaBlastRaycastMoveJob : IJobEntity
     {
-        [ReadOnly] public ComponentLookup<PlasmaBlastData> PlasmaBlastLookup;
+        [ReadOnly] public PhysicsWorld PhysicsWorld;
         [ReadOnly] public ComponentLookup<EnemyProjectileTag> EnemyProjectileLookup;
         [ReadOnly] public ComponentLookup<EnemyTag> EnemyLookup;
-        public BufferLookup<DamageThisFrame> DamageBufferLookup;
-        public ComponentLookup<DestroyEntityFlag> DestroyEntityLookup;
-        
-        public void Execute(TriggerEvent triggerEvent)
-        {
-            Entity plasmaBlastEntity;
-            Entity enemyEntity;
+        [ReadOnly] public ComponentLookup<PlayerTag> PlayerLookup;
+        [ReadOnly] public ComponentLookup<DestroyEntityFlag> DestroyEntityLookup;
+        public EntityCommandBuffer.ParallelWriter CommandBuffer;
+        public float DeltaTime;
 
-            if (PlasmaBlastLookup.HasComponent(triggerEvent.EntityA) && EnemyLookup.HasComponent(triggerEvent.EntityB))
+        private void Execute(
+            [EntityIndexInQuery] int sortKey,
+            Entity entity,
+            ref LocalTransform transform,
+            in PlasmaBlastData data)
+        {
+            var start = transform.Position;
+            var end = start + transform.Right() * data.MoveSpeed * DeltaTime;
+            var isEnemyProjectile = EnemyProjectileLookup.HasComponent(entity);
+            var target = FindCurrentOverlapTarget(start, isEnemyProjectile);
+            if (target != Entity.Null)
             {
-                plasmaBlastEntity = triggerEvent.EntityA;
-                enemyEntity = triggerEvent.EntityB;
-            }
-            else if (PlasmaBlastLookup.HasComponent(triggerEvent.EntityB) && EnemyLookup.HasComponent(triggerEvent.EntityA))
-            {
-                plasmaBlastEntity = triggerEvent.EntityB;
-                enemyEntity = triggerEvent.EntityA;
-            }
-            else
-            {
+                ApplyHit(sortKey, entity, target, data.AttackDamage, start, ref transform);
                 return;
             }
 
-            if (EnemyProjectileLookup.HasComponent(plasmaBlastEntity)) return;
-
-            var attackDamage = PlasmaBlastLookup[plasmaBlastEntity].AttackDamage;
-            var enemyDamageBuffer = DamageBufferLookup[enemyEntity];
-            enemyDamageBuffer.Add(new DamageThisFrame { Value = attackDamage });
-
-            DestroyEntityLookup.SetComponentEnabled(plasmaBlastEntity, true);
-        }
-    }
-
-    [UpdateInGroup(typeof(PhysicsSystemGroup))]
-    [UpdateAfter(typeof(PhysicsSimulationGroup))]
-    [UpdateBefore(typeof(AfterPhysicsSystemGroup))]
-    public partial struct EnemyProjectileAttackSystem : ISystem
-    {
-        public void OnCreate(ref SystemState state)
-        {
-            state.RequireForUpdate<SimulationSingleton>();
-        }
-
-        public void OnUpdate(ref SystemState state)
-        {
-            var attackJob = new EnemyProjectileAttackJob
+            var raycastInput = new RaycastInput
             {
-                ProjectileLookup = SystemAPI.GetComponentLookup<PlasmaBlastData>(true),
-                EnemyProjectileLookup = SystemAPI.GetComponentLookup<EnemyProjectileTag>(true),
-                PlayerLookup = SystemAPI.GetComponentLookup<PlayerTag>(true),
-                DamageBufferLookup = SystemAPI.GetBufferLookup<DamageThisFrame>(),
-                DestroyEntityLookup = SystemAPI.GetComponentLookup<DestroyEntityFlag>()
+                Start = start,
+                End = end,
+                Filter = new CollisionFilter
+                {
+                    BelongsTo = uint.MaxValue,
+                    CollidesWith = uint.MaxValue
+                }
             };
 
-            var simulationSingleton = SystemAPI.GetSingleton<SimulationSingleton>();
-            state.Dependency = attackJob.Schedule(simulationSingleton, state.Dependency);
-        }
-    }
-
-    public struct EnemyProjectileAttackJob : ITriggerEventsJob
-    {
-        [ReadOnly] public ComponentLookup<PlasmaBlastData> ProjectileLookup;
-        [ReadOnly] public ComponentLookup<EnemyProjectileTag> EnemyProjectileLookup;
-        [ReadOnly] public ComponentLookup<PlayerTag> PlayerLookup;
-        public BufferLookup<DamageThisFrame> DamageBufferLookup;
-        public ComponentLookup<DestroyEntityFlag> DestroyEntityLookup;
-
-        public void Execute(TriggerEvent triggerEvent)
-        {
-            Entity projectileEntity;
-            Entity playerEntity;
-
-            if (ProjectileLookup.HasComponent(triggerEvent.EntityA) &&
-                EnemyProjectileLookup.HasComponent(triggerEvent.EntityA) &&
-                PlayerLookup.HasComponent(triggerEvent.EntityB))
+            if (PhysicsWorld.CastRay(raycastInput, out var hit) && IsValidTarget(hit.Entity, isEnemyProjectile))
             {
-                projectileEntity = triggerEvent.EntityA;
-                playerEntity = triggerEvent.EntityB;
-            }
-            else if (ProjectileLookup.HasComponent(triggerEvent.EntityB) &&
-                     EnemyProjectileLookup.HasComponent(triggerEvent.EntityB) &&
-                     PlayerLookup.HasComponent(triggerEvent.EntityA))
-            {
-                projectileEntity = triggerEvent.EntityB;
-                playerEntity = triggerEvent.EntityA;
-            }
-            else
-            {
+                ApplyHit(sortKey, entity, hit.Entity, data.AttackDamage, hit.Position, ref transform);
                 return;
             }
 
-            var attackDamage = ProjectileLookup[projectileEntity].AttackDamage;
-            var playerDamageBuffer = DamageBufferLookup[playerEntity];
-            playerDamageBuffer.Add(new DamageThisFrame { Value = attackDamage });
+            transform.Position = end;
+        }
 
-            DestroyEntityLookup.SetComponentEnabled(projectileEntity, true);
+        private Entity FindCurrentOverlapTarget(float3 position, bool isEnemyProjectile)
+        {
+            var overlapInput = new PointDistanceInput
+            {
+                Position = position,
+                MaxDistance = 0.05f,
+                Filter = new CollisionFilter
+                {
+                    BelongsTo = uint.MaxValue,
+                    CollidesWith = uint.MaxValue
+                }
+            };
+
+            if (!PhysicsWorld.CalculateDistance(overlapInput, out var hit))
+            {
+                return Entity.Null;
+            }
+
+            return IsValidTarget(hit.Entity, isEnemyProjectile) ? hit.Entity : Entity.Null;
+        }
+
+        private void ApplyHit(
+            int sortKey,
+            Entity projectileEntity,
+            Entity targetEntity,
+            int damage,
+            float3 hitPosition,
+            ref LocalTransform transform)
+        {
+            transform.Position = hitPosition;
+            CommandBuffer.AppendToBuffer(sortKey, targetEntity, new DamageThisFrame
+            {
+                Value = damage
+            });
+            CommandBuffer.SetComponentEnabled<DestroyEntityFlag>(sortKey, projectileEntity, true);
+        }
+
+        private bool IsValidTarget(Entity hitEntity, bool isEnemyProjectile)
+        {
+            if (!DestroyEntityLookup.HasComponent(hitEntity))
+            {
+                return false;
+            }
+
+            return isEnemyProjectile
+                ? PlayerLookup.HasComponent(hitEntity)
+                : EnemyLookup.HasComponent(hitEntity);
         }
     }
 }

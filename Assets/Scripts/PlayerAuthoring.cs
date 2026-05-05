@@ -49,6 +49,11 @@ namespace TMG.Survivors
     {
         public int Value;
     }
+
+    public struct PlayerFreeze : IComponentData
+    {
+        public float RemainingTime;
+    }
     
     public struct UpdateGemUIFlag : IComponentData, IEnableableComponent {}
 
@@ -79,6 +84,8 @@ namespace TMG.Survivors
                 AddComponent<InitializeCameraTargetTag>(entity);
                 AddComponent<CameraTarget>(entity);
                 AddComponent<AnimationIndexOverride>(entity);
+                AddComponent<PlayerKnockback>(entity);
+                AddComponent<PlayerFreeze>(entity);
 
                 var enemyLayer = LayerMask.NameToLayer("Enemy");
                 var enemyLayerMask = (uint)math.pow(2, enemyLayer);

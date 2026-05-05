@@ -1295,7 +1295,7 @@ MonoBehaviour:
   AerialArtilleryPrefab: {fileID: 4679082440980975953, guid: 48c30836d9f7d8f44b3a0db1516fd1b8, type: 3}
   SwiftSwarmPrefab: {fileID: 5424416578555912542, guid: 90fbd9c78b222824cabe49cb065591e1, type: 3}
   VolatileVanguardPrefab: {fileID: 8785729372594503702, guid: be767aa2438fde646af8a7393565a32a, type: 3}
-  RollingHazardPrefab: {fileID: 0}
+  RollingHazardPrefab: {fileID: 8619626265178009341, guid: 36784addd956c164cbd318cd5bb6d7a2, type: 3}
   StasisOverlordPrefab: {fileID: 0}
   LightningStrikerPrefab: {fileID: 0}
   HeavyLeaperPrefab: {fileID: 7600937568669482155, guid: 0f7ce4069c15aaa4f8ea1e2f98c7c167, type: 3}
@@ -1304,6 +1304,10 @@ MonoBehaviour:
   SwiftSwarmCount: 12
   VolatileVanguardCount: 5
   HeavyLeaperCount: 5
+  RollingHazardLifetime: 5
+  RollingHazardMoveSpeed: 12
+  RollingHazardKnockbackSpeed: 14
+  RollingHazardKnockbackDuration: 0.35
 --- !u!4 &1418316971
 Transform:
   m_ObjectHideFlags: 0

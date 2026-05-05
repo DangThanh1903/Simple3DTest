@@ -1,4 +1,5 @@
 using Unity.Entities;
+using Unity.Collections;
 using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Physics.Extensions;
@@ -62,6 +63,7 @@ namespace TMG.Survivors
         }
     }
 
+    [UpdateInGroup(typeof(SimulationSystemGroup))]
     [UpdateBefore(typeof(PhysicsSystemGroup))]
     public partial struct EnemyProjectileInitializationSystem : ISystem
     {
@@ -70,13 +72,16 @@ namespace TMG.Survivors
             var ecb = new EntityCommandBuffer(state.WorldUpdateAllocator);
             var playerLayerMask = 1u << 6;
             var enemyLayerMask = 1u << 7;
+            var query = SystemAPI.QueryBuilder()
+                .WithAll<EnemyProjectileTag, InitializeEnemyProjectileFlag, PhysicsCollider>()
+                .Build();
+            var entities = query.ToEntityArray(state.WorldUpdateAllocator);
+            var colliders = query.ToComponentDataArray<PhysicsCollider>(state.WorldUpdateAllocator);
 
-            foreach (var (collider, entity) in SystemAPI
-                         .Query<RefRW<PhysicsCollider>>()
-                         .WithAll<EnemyProjectileTag, InitializeEnemyProjectileFlag>()
-                         .WithEntityAccess())
+            for (var i = 0; i < entities.Length; i++)
             {
-                var colliderValue = collider.ValueRW;
+                var entity = entities[i];
+                var colliderValue = colliders[i];
                 colliderValue.MakeUnique(entity, state.EntityManager);
                 colliderValue.Value.Value.SetCollisionFilter(new CollisionFilter
                 {
@@ -84,7 +89,7 @@ namespace TMG.Survivors
                     CollidesWith = playerLayerMask
                 });
 
-                collider.ValueRW = colliderValue;
+                state.EntityManager.SetComponentData(entity, colliderValue);
                 ecb.RemoveComponent<InitializeEnemyProjectileFlag>(entity);
             }
 
@@ -216,6 +221,247 @@ namespace TMG.Survivors
                 leaperState.ValueRW.Phase = HeavyLeaperPhase.Waiting;
                 leaperState.ValueRW.Timer = data.LeapInterval;
             }
+        }
+    }
+
+    public partial struct StasisOverlordSystem : ISystem
+    {
+        public void OnCreate(ref SystemState state)
+        {
+            state.RequireForUpdate<PlayerTag>();
+        }
+
+        public void OnUpdate(ref SystemState state)
+        {
+            var deltaTime = SystemAPI.Time.DeltaTime;
+            var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
+            var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position;
+            var playerFreeze = SystemAPI.GetComponentRW<PlayerFreeze>(playerEntity);
+
+            foreach (var (transform, data, stasisState) in SystemAPI
+                         .Query<RefRW<LocalTransform>, StasisOverlordData, RefRW<StasisOverlordState>>()
+                         .WithAll<StasisOverlordTag>())
+            {
+                if (stasisState.ValueRO.BaseScale <= 0f)
+                {
+                    stasisState.ValueRW.BaseScale = transform.ValueRO.Scale;
+                }
+
+                stasisState.ValueRW.CastTimer -= deltaTime;
+                transform.ValueRW.Scale = stasisState.ValueRO.BaseScale;
+
+                var distanceToPlayerSq = math.distancesq(transform.ValueRO.Position.xy, playerPosition.xy);
+                if (stasisState.ValueRO.CastTimer > 0f ||
+                    distanceToPlayerSq > data.FreezeRange * data.FreezeRange)
+                {
+                    continue;
+                }
+
+                playerFreeze.ValueRW.RemainingTime = math.max(playerFreeze.ValueRO.RemainingTime, data.FreezeDuration);
+                stasisState.ValueRW.CastTimer = data.CastCooldown;
+                transform.ValueRW.Scale = stasisState.ValueRO.BaseScale * 1.35f;
+            }
+        }
+    }
+
+    public partial struct LightningStrikerSystem : ISystem
+    {
+        public void OnCreate(ref SystemState state)
+        {
+            state.RequireForUpdate<PlayerTag>();
+        }
+
+        public void OnUpdate(ref SystemState state)
+        {
+            var deltaTime = SystemAPI.Time.DeltaTime;
+            var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
+            var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position;
+            var playerDamageBuffer = SystemAPI.GetBuffer<DamageThisFrame>(playerEntity);
+
+            foreach (var (transform, data, lightningState, entity) in SystemAPI
+                         .Query<RefRW<LocalTransform>, LightningStrikerData, RefRW<LightningStrikerState>>()
+                         .WithAll<LightningStrikerTag>()
+                         .WithPresent<DestroyEntityFlag>()
+                         .WithEntityAccess())
+            {
+                if (lightningState.ValueRO.BaseScale <= 0f)
+                {
+                    lightningState.ValueRW.BaseScale = transform.ValueRO.Scale;
+                }
+
+                lightningState.ValueRW.Timer -= deltaTime;
+
+                if (lightningState.ValueRO.Phase == LightningStrikerPhase.Flying)
+                {
+                    transform.ValueRW.Position += new float3(data.FlySpeed * deltaTime, 0f, 0f);
+                    transform.ValueRW.Scale = lightningState.ValueRO.BaseScale;
+
+                    if (lightningState.ValueRO.Timer > 0f)
+                    {
+                        continue;
+                    }
+
+                    lightningState.ValueRW.Phase = LightningStrikerPhase.Locking;
+                    lightningState.ValueRW.Timer = data.LockDuration;
+                    lightningState.ValueRW.LockedTargetPosition = playerPosition;
+                    continue;
+                }
+
+                if (lightningState.ValueRO.Phase == LightningStrikerPhase.Locking)
+                {
+                    transform.ValueRW.Scale = lightningState.ValueRO.BaseScale * 1.4f;
+
+                    if (lightningState.ValueRO.Timer > 0f)
+                    {
+                        continue;
+                    }
+
+                    lightningState.ValueRW.Phase = LightningStrikerPhase.Striking;
+                    lightningState.ValueRW.Timer = 0.15f;
+
+                    var distanceToLockedTargetSq = math.distancesq(playerPosition.xy, lightningState.ValueRO.LockedTargetPosition.xy);
+                    if (distanceToLockedTargetSq <= data.StrikeRadius * data.StrikeRadius)
+                    {
+                        playerDamageBuffer.Add(new DamageThisFrame
+                        {
+                            Value = data.StrikeDamage
+                        });
+                    }
+
+                    continue;
+                }
+
+                transform.ValueRW.Position = lightningState.ValueRO.LockedTargetPosition;
+                transform.ValueRW.Scale = lightningState.ValueRO.BaseScale * 2f;
+                if (lightningState.ValueRO.Timer <= 0f)
+                {
+                    SystemAPI.SetComponentEnabled<DestroyEntityFlag>(entity, true);
+                }
+            }
+        }
+    }
+
+    public partial struct RollingHazardMoveSystem : ISystem
+    {
+        public void OnUpdate(ref SystemState state)
+        {
+            var deltaTime = SystemAPI.Time.DeltaTime;
+
+            foreach (var (transform, data, hazardState, entity) in SystemAPI
+                         .Query<RefRW<LocalTransform>, RollingHazardData, RefRW<RollingHazardState>>()
+                         .WithAll<RollingHazardTag>()
+                         .WithPresent<DestroyEntityFlag>()
+                         .WithEntityAccess())
+            {
+                transform.ValueRW.Position += new float3(hazardState.ValueRO.Direction * data.MoveSpeed * deltaTime, 0f);
+                transform.ValueRW.Rotation = math.mul(transform.ValueRO.Rotation, quaternion.RotateZ(-data.MoveSpeed * deltaTime));
+
+                hazardState.ValueRW.RemainingTime -= deltaTime;
+                if (hazardState.ValueRO.RemainingTime <= 0f)
+                {
+                    SystemAPI.SetComponentEnabled<DestroyEntityFlag>(entity, true);
+                }
+            }
+        }
+    }
+
+    [UpdateInGroup(typeof(SimulationSystemGroup))]
+    [UpdateBefore(typeof(PhysicsSystemGroup))]
+    public partial struct RollingHazardInitializationSystem : ISystem
+    {
+        public void OnUpdate(ref SystemState state)
+        {
+            var ecb = new EntityCommandBuffer(state.WorldUpdateAllocator);
+            var playerLayerMask = 1u << 6;
+            var environmentLayerMask = 1u << 9;
+            var query = SystemAPI.QueryBuilder()
+                .WithAll<RollingHazardTag, InitializeRollingHazardFlag, PhysicsCollider>()
+                .Build();
+            var entities = query.ToEntityArray(state.WorldUpdateAllocator);
+            var colliders = query.ToComponentDataArray<PhysicsCollider>(state.WorldUpdateAllocator);
+
+            for (var i = 0; i < entities.Length; i++)
+            {
+                var entity = entities[i];
+                var colliderValue = colliders[i];
+                colliderValue.MakeUnique(entity, state.EntityManager);
+                colliderValue.Value.Value.SetCollisionFilter(new CollisionFilter
+                {
+                    BelongsTo = environmentLayerMask,
+                    CollidesWith = playerLayerMask
+                });
+
+                state.EntityManager.SetComponentData(entity, colliderValue);
+                ecb.RemoveComponent<InitializeRollingHazardFlag>(entity);
+            }
+
+            ecb.Playback(state.EntityManager);
+        }
+    }
+
+    [UpdateInGroup(typeof(PhysicsSystemGroup))]
+    [UpdateAfter(typeof(PhysicsSimulationGroup))]
+    [UpdateBefore(typeof(AfterPhysicsSystemGroup))]
+    public partial struct RollingHazardKnockbackSystem : ISystem
+    {
+        public void OnCreate(ref SystemState state)
+        {
+            state.RequireForUpdate<SimulationSingleton>();
+        }
+
+        public void OnUpdate(ref SystemState state)
+        {
+            var knockbackJob = new RollingHazardKnockbackJob
+            {
+                HazardLookup = SystemAPI.GetComponentLookup<RollingHazardData>(true),
+                HazardStateLookup = SystemAPI.GetComponentLookup<RollingHazardState>(true),
+                PlayerLookup = SystemAPI.GetComponentLookup<PlayerTag>(true),
+                PlayerKnockbackLookup = SystemAPI.GetComponentLookup<PlayerKnockback>()
+            };
+
+            var simulationSingleton = SystemAPI.GetSingleton<SimulationSingleton>();
+            state.Dependency = knockbackJob.Schedule(simulationSingleton, state.Dependency);
+        }
+    }
+
+    public struct RollingHazardKnockbackJob : ICollisionEventsJob
+    {
+        [ReadOnly] public ComponentLookup<RollingHazardData> HazardLookup;
+        [ReadOnly] public ComponentLookup<RollingHazardState> HazardStateLookup;
+        [ReadOnly] public ComponentLookup<PlayerTag> PlayerLookup;
+        public ComponentLookup<PlayerKnockback> PlayerKnockbackLookup;
+
+        public void Execute(CollisionEvent collisionEvent)
+        {
+            Entity hazardEntity;
+            Entity playerEntity;
+
+            if (HazardLookup.HasComponent(collisionEvent.EntityA) && PlayerLookup.HasComponent(collisionEvent.EntityB))
+            {
+                hazardEntity = collisionEvent.EntityA;
+                playerEntity = collisionEvent.EntityB;
+            }
+            else if (HazardLookup.HasComponent(collisionEvent.EntityB) && PlayerLookup.HasComponent(collisionEvent.EntityA))
+            {
+                hazardEntity = collisionEvent.EntityB;
+                playerEntity = collisionEvent.EntityA;
+            }
+            else
+            {
+                return;
+            }
+
+            var hazardData = HazardLookup[hazardEntity];
+            var hazardState = HazardStateLookup[hazardEntity];
+            var knockbackDirection = math.lengthsq(hazardState.Direction) > 0.0001f
+                ? math.normalize(hazardState.Direction)
+                : new float2(1f, 0f);
+
+            PlayerKnockbackLookup[playerEntity] = new PlayerKnockback
+            {
+                RemainingTime = hazardData.KnockbackDuration,
+                Velocity = knockbackDirection * hazardData.KnockbackSpeed
+            };
         }
     }
 }
