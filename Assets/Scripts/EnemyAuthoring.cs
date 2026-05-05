@@ -300,6 +300,10 @@ namespace TMG.Survivors
     public partial struct ChasePlayerMoveSystem : ISystem
     {
         private EntityQuery _chaseQuery;
+        private NativeList<Entity> _entities;
+        private NativeList<LocalTransform> _transforms;
+        private NativeList<float2> _positions;
+        private NativeList<SpatialHashAndIndex> _hashAndIndices;
         private const float SpatialHashCellSize = 1.75f;
         private const float SeparationRadius = 1.25f;
         private const float SeparationWeight = 1.35f;
@@ -310,6 +314,33 @@ namespace TMG.Survivors
             _chaseQuery = SystemAPI.QueryBuilder()
                 .WithAll<ChasePlayerTag, CharacterMoveDirection, LocalTransform>()
                 .Build();
+            _entities = new NativeList<Entity>(128, Allocator.Persistent);
+            _transforms = new NativeList<LocalTransform>(128, Allocator.Persistent);
+            _positions = new NativeList<float2>(128, Allocator.Persistent);
+            _hashAndIndices = new NativeList<SpatialHashAndIndex>(128, Allocator.Persistent);
+        }
+
+        public void OnDestroy(ref SystemState state)
+        {
+            if (_entities.IsCreated)
+            {
+                _entities.Dispose();
+            }
+
+            if (_transforms.IsCreated)
+            {
+                _transforms.Dispose();
+            }
+
+            if (_positions.IsCreated)
+            {
+                _positions.Dispose();
+            }
+
+            if (_hashAndIndices.IsCreated)
+            {
+                _hashAndIndices.Dispose();
+            }
         }
 
         public void OnUpdate(ref SystemState state)
@@ -322,30 +353,48 @@ namespace TMG.Survivors
 
             var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
             var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position.xy;
-            var entities = _chaseQuery.ToEntityArray(Allocator.TempJob);
-            var transforms = _chaseQuery.ToComponentDataArray<LocalTransform>(Allocator.TempJob);
-            var positions = new NativeArray<float2>(entityCount, Allocator.TempJob);
-            var hashAndIndices = new NativeArray<SpatialHashAndIndex>(entityCount, Allocator.TempJob);
+            EnsureCapacity(entityCount);
+            state.Dependency.Complete();
+            _entities.Clear();
+            _transforms.Clear();
+
+            foreach (var (transform, entity) in SystemAPI
+                         .Query<LocalTransform>()
+                         .WithAll<ChasePlayerTag, CharacterMoveDirection>()
+                         .WithEntityAccess())
+            {
+                _entities.Add(entity);
+                _transforms.Add(transform);
+            }
+
+            var chaseCount = _entities.Length;
+            if (chaseCount == 0)
+            {
+                return;
+            }
+
+            _positions.ResizeUninitialized(chaseCount);
+            _hashAndIndices.ResizeUninitialized(chaseCount);
 
             var buildHashJob = new BuildChaseSpatialHashJob
             {
-                Transforms = transforms,
-                Positions = positions,
-                HashAndIndices = hashAndIndices,
+                Transforms = _transforms.AsArray(),
+                Positions = _positions.AsArray(),
+                HashAndIndices = _hashAndIndices.AsArray(),
                 CellSize = SpatialHashCellSize
             };
 
-            var buildHandle = buildHashJob.Schedule(entityCount, 64, state.Dependency);
+            var buildHandle = buildHashJob.Schedule(chaseCount, 64, state.Dependency);
             var sortHandle = new SortChaseSpatialHashJob
             {
-                HashAndIndices = hashAndIndices
+                HashAndIndices = _hashAndIndices.AsArray()
             }.Schedule(buildHandle);
 
             var moveJob = new ChasePlayerSpatialMoveJob
             {
-                Entities = entities,
-                Positions = positions,
-                HashAndIndices = hashAndIndices,
+                Entities = _entities.AsArray(),
+                Positions = _positions.AsArray(),
+                HashAndIndices = _hashAndIndices.AsArray(),
                 DirectionLookup = SystemAPI.GetComponentLookup<CharacterMoveDirection>(),
                 PlayerPosition = playerPosition,
                 CellSize = SpatialHashCellSize,
@@ -353,18 +402,31 @@ namespace TMG.Survivors
                 SeparationWeight = SeparationWeight
             };
 
-            var moveHandle = moveJob.Schedule(entityCount, 64, sortHandle);
-            var disposeEntityAndTransformHandle = JobHandle.CombineDependencies(
-                entities.Dispose(moveHandle),
-                transforms.Dispose(moveHandle));
-            var disposeSpatialDataHandle = JobHandle.CombineDependencies(
-                positions.Dispose(moveHandle),
-                hashAndIndices.Dispose(moveHandle));
-            var disposeHandle = JobHandle.CombineDependencies(
-                disposeEntityAndTransformHandle,
-                disposeSpatialDataHandle);
+            var moveHandle = moveJob.Schedule(chaseCount, 64, sortHandle);
+            state.Dependency = moveHandle;
+        }
 
-            state.Dependency = disposeHandle;
+        private void EnsureCapacity(int entityCount)
+        {
+            if (_entities.Capacity < entityCount)
+            {
+                _entities.Capacity = entityCount;
+            }
+
+            if (_transforms.Capacity < entityCount)
+            {
+                _transforms.Capacity = entityCount;
+            }
+
+            if (_positions.Capacity < entityCount)
+            {
+                _positions.Capacity = entityCount;
+            }
+
+            if (_hashAndIndices.Capacity < entityCount)
+            {
+                _hashAndIndices.Capacity = entityCount;
+            }
         }
     }
 
