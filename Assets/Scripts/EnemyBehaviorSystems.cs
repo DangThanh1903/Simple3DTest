@@ -10,10 +10,16 @@ namespace TMG.Survivors
 {
     public partial struct AerialArtillerySystem : ISystem
     {
+        private EntityQuery _pooledEnemyProjectileQuery;
+
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<PlayerTag>();
             state.RequireForUpdate<BeginInitializationEntityCommandBufferSystem.Singleton>();
+            _pooledEnemyProjectileQuery = SystemAPI.QueryBuilder()
+                .WithAll<PooledEnemyProjectileTag, EnemyProjectileTag, Disabled, PlasmaBlastData, LocalTransform>()
+                .WithOptions(EntityQueryOptions.IncludeDisabledEntities)
+                .Build();
         }
 
         public void OnUpdate(ref SystemState state)
@@ -52,19 +58,59 @@ namespace TMG.Survivors
                     continue;
                 }
 
-                var angle = math.atan2(toPlayer.y, toPlayer.x);
-                var projectile = ecb.Instantiate(aerialData.ProjectilePrefab);
-                ecb.SetComponent(projectile, LocalTransform.FromPositionRotation(transform.Position, quaternion.Euler(0f, 0f, angle)));
-                ecb.AddComponent<EnemyProjectileTag>(projectile);
-                ecb.AddComponent<InitializeEnemyProjectileFlag>(projectile);
+                SpawnEnemyProjectile(ref state, ecb, aerialData.ProjectilePrefab, transform.Position, toPlayer);
 
                 aerialState.ValueRW.ShootTimer = aerialData.ShootCooldown;
             }
         }
+
+        private void SpawnEnemyProjectile(
+            ref SystemState state,
+            EntityCommandBuffer ecb,
+            Entity projectilePrefab,
+            float3 spawnPosition,
+            float2 toPlayer)
+        {
+            var angle = math.atan2(toPlayer.y, toPlayer.x);
+            var spawnTransform = LocalTransform.FromPositionRotation(spawnPosition, quaternion.Euler(0f, 0f, angle));
+            var projectile = GetPooledProjectile();
+
+            if (projectile == Entity.Null)
+            {
+                projectile = ecb.Instantiate(projectilePrefab);
+                ecb.AddComponent<EnemyProjectileTag>(projectile);
+                ecb.AddComponent<PooledEnemyProjectileTag>(projectile);
+                ecb.AddComponent<InitializeEnemyProjectileFlag>(projectile);
+            }
+            else
+            {
+                var projectileData = state.EntityManager.GetComponentData<PlasmaBlastData>(projectile);
+                ecb.RemoveComponent<Disabled>(projectile);
+                ecb.SetComponent(projectile, new PlasmaBlastExpirationTimer
+                {
+                    Value = projectileData.Lifetime
+                });
+                ecb.SetComponentEnabled<DestroyEntityFlag>(projectile, false);
+            }
+
+            ecb.SetComponent(projectile, spawnTransform);
+        }
+
+        private Entity GetPooledProjectile()
+        {
+            if (_pooledEnemyProjectileQuery.IsEmptyIgnoreFilter)
+            {
+                return Entity.Null;
+            }
+
+            var pooledProjectiles = _pooledEnemyProjectileQuery.ToEntityArray(Allocator.Temp);
+            var projectile = pooledProjectiles.Length > 0 ? pooledProjectiles[0] : Entity.Null;
+            pooledProjectiles.Dispose();
+            return projectile;
+        }
     }
 
-    [UpdateInGroup(typeof(SimulationSystemGroup))]
-    [UpdateBefore(typeof(PhysicsSystemGroup))]
+    [UpdateInGroup(typeof(BeforePhysicsSystemGroup))]
     public partial struct EnemyProjectileInitializationSystem : ISystem
     {
         public void OnUpdate(ref SystemState state)
@@ -365,8 +411,7 @@ namespace TMG.Survivors
         }
     }
 
-    [UpdateInGroup(typeof(SimulationSystemGroup))]
-    [UpdateBefore(typeof(PhysicsSystemGroup))]
+    [UpdateInGroup(typeof(BeforePhysicsSystemGroup))]
     public partial struct RollingHazardInitializationSystem : ISystem
     {
         public void OnUpdate(ref SystemState state)

@@ -13,6 +13,7 @@ namespace TMG.Survivors
     {
         public float MoveSpeed;
         public int AttackDamage;
+        public float Lifetime;
     }
 
     public struct PlasmaBlastExpirationTimer : IComponentData
@@ -35,7 +36,8 @@ namespace TMG.Survivors
                 AddComponent(entity, new PlasmaBlastData
                 {
                     MoveSpeed = authoring.MoveSpeed,
-                    AttackDamage = authoring.AttackDamage
+                    AttackDamage = authoring.AttackDamage,
+                    Lifetime = authoring.DestroyAfterTime
                 });
                 
                 AddComponent(entity, new PlasmaBlastExpirationTimer

@@ -24,6 +24,17 @@ namespace TMG.Survivors
             
             foreach (var (_, entity) in SystemAPI.Query<DestroyEntityFlag>().WithEntityAccess())
             {
+                if (SystemAPI.HasComponent<PooledEnemyProjectileTag>(entity))
+                {
+                    endEcb.SetComponentEnabled<DestroyEntityFlag>(entity, false);
+                    if (!SystemAPI.HasComponent<Disabled>(entity))
+                    {
+                        endEcb.AddComponent<Disabled>(entity);
+                    }
+
+                    continue;
+                }
+
                 if (SystemAPI.HasComponent<PlayerTag>(entity))
                 {
                     GameUIController.Instance.ShowGameOverUI();

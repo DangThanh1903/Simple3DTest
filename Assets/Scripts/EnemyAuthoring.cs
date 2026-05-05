@@ -36,6 +36,7 @@ namespace TMG.Survivors
     public struct LightningStrikerTag : IComponentData {}
     public struct EnemyProjectileTag : IComponentData {}
     public struct InitializeEnemyProjectileFlag : IComponentData {}
+    public struct PooledEnemyProjectileTag : IComponentData {}
 
     public struct RollingHazardData : IComponentData
     {
