@@ -27,8 +27,13 @@ namespace TMG.Survivors
             var deltaTime = SystemAPI.Time.DeltaTime;
             var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
             var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position;
+            var fallbackProjectilePrefab = SystemAPI.HasSingleton<AbilitySpawnData>()
+                ? SystemAPI.GetSingleton<AbilitySpawnData>().EnemyProjectilePrefab
+                : Entity.Null;
             var ecbSystem = SystemAPI.GetSingleton<BeginInitializationEntityCommandBufferSystem.Singleton>();
             var ecb = ecbSystem.CreateCommandBuffer(state.WorldUnmanaged);
+            var pooledProjectiles = _pooledEnemyProjectileQuery.ToEntityArray(Allocator.Temp);
+            var pooledProjectileIndex = 0;
 
             foreach (var (direction, aerialData, aerialState, transform) in SystemAPI
                          .Query<RefRW<CharacterMoveDirection>, AerialArtilleryData, RefRW<AerialArtilleryState>, LocalTransform>()
@@ -53,15 +58,29 @@ namespace TMG.Survivors
                 }
 
                 aerialState.ValueRW.ShootTimer -= deltaTime;
-                if (aerialState.ValueRO.ShootTimer > 0f || aerialData.ProjectilePrefab == Entity.Null)
+                var projectilePrefab = aerialData.ProjectilePrefab != Entity.Null
+                    ? aerialData.ProjectilePrefab
+                    : fallbackProjectilePrefab;
+                if (aerialState.ValueRO.ShootTimer > 0f ||
+                    projectilePrefab == Entity.Null ||
+                    !state.EntityManager.HasComponent<PlasmaBlastData>(projectilePrefab))
                 {
                     continue;
                 }
 
-                SpawnEnemyProjectile(ref state, ecb, aerialData.ProjectilePrefab, transform.Position, toPlayer);
+                SpawnEnemyProjectile(
+                    ref state,
+                    ecb,
+                    projectilePrefab,
+                    transform.Position,
+                    toPlayer,
+                    pooledProjectiles,
+                    ref pooledProjectileIndex);
 
                 aerialState.ValueRW.ShootTimer = aerialData.ShootCooldown;
             }
+
+            pooledProjectiles.Dispose();
         }
 
         private void SpawnEnemyProjectile(
@@ -69,44 +88,46 @@ namespace TMG.Survivors
             EntityCommandBuffer ecb,
             Entity projectilePrefab,
             float3 spawnPosition,
-            float2 toPlayer)
+            float2 toPlayer,
+            NativeArray<Entity> pooledProjectiles,
+            ref int pooledProjectileIndex)
         {
             var angle = math.atan2(toPlayer.y, toPlayer.x);
             var spawnTransform = LocalTransform.FromPositionRotation(spawnPosition, quaternion.Euler(0f, 0f, angle));
-            var projectile = GetPooledProjectile();
+            var projectileData = state.EntityManager.GetComponentData<PlasmaBlastData>(projectilePrefab);
+            var projectile = pooledProjectileIndex < pooledProjectiles.Length
+                ? pooledProjectiles[pooledProjectileIndex++]
+                : Entity.Null;
 
             if (projectile == Entity.Null)
             {
                 projectile = ecb.Instantiate(projectilePrefab);
-                ecb.AddComponent<EnemyProjectileTag>(projectile);
-                ecb.AddComponent<PooledEnemyProjectileTag>(projectile);
-                ecb.AddComponent<InitializeEnemyProjectileFlag>(projectile);
+                if (!state.EntityManager.HasComponent<EnemyProjectileTag>(projectilePrefab))
+                {
+                    ecb.AddComponent<EnemyProjectileTag>(projectile);
+                }
+
+                if (!state.EntityManager.HasComponent<PooledEnemyProjectileTag>(projectilePrefab))
+                {
+                    ecb.AddComponent<PooledEnemyProjectileTag>(projectile);
+                }
+
+                if (!state.EntityManager.HasComponent<InitializeEnemyProjectileFlag>(projectilePrefab))
+                {
+                    ecb.AddComponent<InitializeEnemyProjectileFlag>(projectile);
+                }
             }
             else
             {
-                var projectileData = state.EntityManager.GetComponentData<PlasmaBlastData>(projectile);
                 ecb.RemoveComponent<Disabled>(projectile);
-                ecb.SetComponent(projectile, new PlasmaBlastExpirationTimer
-                {
-                    Value = projectileData.Lifetime
-                });
                 ecb.SetComponentEnabled<DestroyEntityFlag>(projectile, false);
             }
 
-            ecb.SetComponent(projectile, spawnTransform);
-        }
-
-        private Entity GetPooledProjectile()
-        {
-            if (_pooledEnemyProjectileQuery.IsEmptyIgnoreFilter)
+            ecb.SetComponent(projectile, new PlasmaBlastExpirationTimer
             {
-                return Entity.Null;
-            }
-
-            var pooledProjectiles = _pooledEnemyProjectileQuery.ToEntityArray(Allocator.Temp);
-            var projectile = pooledProjectiles.Length > 0 ? pooledProjectiles[0] : Entity.Null;
-            pooledProjectiles.Dispose();
-            return projectile;
+                Value = projectileData.Lifetime
+            });
+            ecb.SetComponent(projectile, spawnTransform);
         }
     }
 

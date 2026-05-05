@@ -96,12 +96,13 @@ namespace TMG.Survivors
             var projectilePrefab = spawnData.EnemyProjectilePrefab;
             if (state.EntityManager.HasComponent<AerialArtilleryData>(prefab))
             {
+                var aerialData = state.EntityManager.GetComponentData<AerialArtilleryData>(prefab);
                 if (projectilePrefab != Entity.Null)
                 {
-                    var aerialData = state.EntityManager.GetComponentData<AerialArtilleryData>(prefab);
                     aerialData.ProjectilePrefab = projectilePrefab;
-                    ecb.SetComponent(entity, aerialData);
                 }
+
+                ecb.SetComponent(entity, aerialData);
             }
             else
             {

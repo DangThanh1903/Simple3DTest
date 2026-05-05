@@ -1291,14 +1291,14 @@
         "m_Id": "0fdfebb358d441d88834cc454044bc59"
     },
     "m_AllowMaterialOverride": true,
-    "m_SurfaceType": 1,
+    "m_SurfaceType": 0,
     "m_ZTestMode": 4,
     "m_ZWriteControl": 0,
     "m_AlphaMode": 0,
     "m_RenderFace": 2,
     "m_AlphaClip": true,
     "m_CastShadows": false,
-    "m_ReceiveShadows": true,
+    "m_ReceiveShadows": false,
     "m_DisableTint": false,
     "m_AdditionalMotionVectorMode": 0,
     "m_AlembicMotionVectors": false,
@@ -4468,4 +4468,3 @@
         "m_Id": "fc46afb8b0a64388a8129b81f1fc815f"
     }
 }
-
