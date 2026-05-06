@@ -54,6 +54,8 @@ namespace TMG.Survivors
     {
         public float RemainingTime;
     }
+
+    public struct InvincibleTag : IComponentData {}
     
     public struct UpdateGemUIFlag : IComponentData, IEnableableComponent {}
 
@@ -74,6 +76,7 @@ namespace TMG.Survivors
         public float CooldownTime;
         public float DetectionSize;
         public GameObject WorldUIPrefab;
+        public bool IsInvincible = true;
         
         private class Baker : Baker<PlayerAuthoring>
         {
@@ -86,6 +89,10 @@ namespace TMG.Survivors
                 AddComponent<AnimationIndexOverride>(entity);
                 AddComponent<PlayerKnockback>(entity);
                 AddComponent<PlayerFreeze>(entity);
+                if (authoring.IsInvincible)
+                {
+                    AddComponent<InvincibleTag>(entity);
+                }
 
                 var enemyLayer = LayerMask.NameToLayer("Enemy");
                 var enemyLayerMask = (uint)math.pow(2, enemyLayer);

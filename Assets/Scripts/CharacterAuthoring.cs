@@ -158,6 +158,12 @@ namespace TMG.Survivors
             foreach (var (hitPoints, damageThisFrame, entity) in SystemAPI.Query<RefRW<CharacterCurrentHitPoints>, DynamicBuffer<DamageThisFrame>>().WithPresent<DestroyEntityFlag>().WithEntityAccess())
             {
                 if (damageThisFrame.IsEmpty) continue;
+                if (SystemAPI.HasComponent<InvincibleTag>(entity))
+                {
+                    damageThisFrame.Clear();
+                    continue;
+                }
+
                 foreach (var damage in damageThisFrame)
                 {
                     hitPoints.ValueRW.Value -= damage.Value;

@@ -12,6 +12,7 @@ namespace TMG.Survivors
         public static GameUIController Instance;
 
         [SerializeField] private TextMeshProUGUI _gemsCollectedText;
+        [SerializeField] private TextMeshProUGUI _entityCounterText;
         [SerializeField] private GameObject _gameOverPanel;
         [SerializeField] private Button _quitButton;
         
@@ -32,6 +33,7 @@ namespace TMG.Survivors
             Instance = this;
 
             UpdateGemsCollectedText(0);
+            EnsureEntityCounterText();
         }
 
         private void OnEnable()
@@ -83,6 +85,41 @@ namespace TMG.Survivors
         public void UpdateGemsCollectedText(int gemsCollected)
         {
             _gemsCollectedText.text = $"{gemsCollected:N0}";
+        }
+
+        public void UpdateEntityCounterText(int enemyCount, int projectileCount, int hazardCount, int pooledProjectileCount)
+        {
+            EnsureEntityCounterText();
+            if (_entityCounterText == null) return;
+
+            _entityCounterText.text =
+                $"Enemies: {enemyCount:N0}\n" +
+                $"Projectiles: {projectileCount:N0}\n" +
+                $"Hazards: {hazardCount:N0}\n" +
+                $"Pooled: {pooledProjectileCount:N0}";
+        }
+
+        private void EnsureEntityCounterText()
+        {
+            if (_entityCounterText != null || _gemsCollectedText == null) return;
+
+            var counterObject = new GameObject("EntityCounterText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            var sourceTransform = _gemsCollectedText.rectTransform;
+            var rectTransform = counterObject.GetComponent<RectTransform>();
+            rectTransform.SetParent(sourceTransform.parent, false);
+            rectTransform.anchorMin = new Vector2(0f, 1f);
+            rectTransform.anchorMax = new Vector2(0f, 1f);
+            rectTransform.pivot = new Vector2(0f, 1f);
+            rectTransform.anchoredPosition = new Vector2(20f, -70f);
+            rectTransform.sizeDelta = new Vector2(260f, 110f);
+
+            _entityCounterText = counterObject.GetComponent<TextMeshProUGUI>();
+            _entityCounterText.font = _gemsCollectedText.font;
+            _entityCounterText.fontSize = 18f;
+            _entityCounterText.color = Color.white;
+            _entityCounterText.alignment = TextAlignmentOptions.TopLeft;
+            _entityCounterText.raycastTarget = false;
+            _entityCounterText.text = "Enemies: 0\nProjectiles: 0\nHazards: 0\nPooled: 0";
         }
 
         public void ShowGameOverUI()
