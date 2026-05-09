@@ -172,3 +172,7 @@ MonoBehaviour:
   AttackDamage: 1000000
   CooldownTime: 0.1
   GemPrefab: {fileID: 4075428313511067202, guid: 1ef86984360a3aa4096170e8c558319e, type: 3}
+  HeavyLeapInterval: 1.5
+  HeavyLeapDuration: 0.65
+  HeavySlamRadius: 3.5
+  HeavySlamDamage: 20

@@ -21,7 +21,8 @@ namespace TMG.Survivors
         AerialArtillery = 2,
         VolatileVanguard = 3,
         HeavyLeaper = 4,
-        StasisOverlord = 5
+        StasisOverlord = 5,
+        LightningStriker = 6
     }
 
     public struct MeleeChaserTag : IComponentData {}
@@ -191,6 +192,13 @@ namespace TMG.Survivors
         public float StasisFreezeRange = 8f;
         public float StasisFreezeDuration = 2f;
         public float StasisCastCooldown = 4f;
+
+        [Header("Lightning Striker")]
+        public float LightningFlyDuration = 1.25f;
+        public float LightningFlySpeed = 18f;
+        public float LightningLockDuration = 0.75f;
+        public float LightningStrikeRadius = 2.75f;
+        public int LightningStrikeDamage = 35;
         
         private class Baker : Baker<EnemyAuthoring>
         {
@@ -199,17 +207,28 @@ namespace TMG.Survivors
                 var entity = GetEntity(TransformUsageFlags.Dynamic);
                 AddComponent<EnemyTag>(entity);
                 AddBehaviorTag(entity, authoring);
-                AddComponent(entity, new EnemyAttackData
+
+                if (HasContactAttack(authoring.BehaviorType))
                 {
-                    HitPoints = authoring.AttackDamage,
-                    CooldownTime = authoring.CooldownTime
-                });
-                AddComponent<EnemyCooldownExpirationTimestamp>(entity);
-                SetComponentEnabled<EnemyCooldownExpirationTimestamp>(entity, false);
+                    AddComponent(entity, new EnemyAttackData
+                    {
+                        HitPoints = authoring.AttackDamage,
+                        CooldownTime = authoring.CooldownTime
+                    });
+                    AddComponent<EnemyCooldownExpirationTimestamp>(entity);
+                    SetComponentEnabled<EnemyCooldownExpirationTimestamp>(entity, false);
+                }
+
                 AddComponent(entity, new GemPrefab
                 {
                     Value = GetEntity(authoring.GemPrefab, TransformUsageFlags.Dynamic)
                 });
+            }
+
+            private static bool HasContactAttack(EnemyBehaviorType behaviorType)
+            {
+                return behaviorType == EnemyBehaviorType.MeleeChaser ||
+                       behaviorType == EnemyBehaviorType.SwiftSwarm;
             }
 
             private void AddBehaviorTag(Entity entity, EnemyAuthoring authoring)
@@ -285,6 +304,24 @@ namespace TMG.Survivors
                         AddComponent(entity, new StasisOverlordState
                         {
                             CastTimer = 1f,
+                            BaseScale = math.max(0.1f, authoring.transform.localScale.x)
+                        });
+                        break;
+                    case EnemyBehaviorType.LightningStriker:
+                        AddComponent<LightningStrikerTag>(entity);
+                        AddComponent(entity, new LightningStrikerData
+                        {
+                            FlyDuration = math.max(0.1f, authoring.LightningFlyDuration),
+                            FlySpeed = math.max(0.1f, authoring.LightningFlySpeed),
+                            LockDuration = math.max(0.1f, authoring.LightningLockDuration),
+                            StrikeRadius = math.max(0.1f, authoring.LightningStrikeRadius),
+                            StrikeDamage = math.max(1, authoring.LightningStrikeDamage)
+                        });
+                        AddComponent(entity, new LightningStrikerState
+                        {
+                            Phase = LightningStrikerPhase.Flying,
+                            Timer = math.max(0.1f, authoring.LightningFlyDuration),
+                            LockedTargetPosition = float3.zero,
                             BaseScale = math.max(0.1f, authoring.transform.localScale.x)
                         });
                         break;

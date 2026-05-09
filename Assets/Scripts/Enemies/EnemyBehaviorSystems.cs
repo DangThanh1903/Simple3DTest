@@ -27,9 +27,6 @@ namespace TMG.Survivors
             var deltaTime = SystemAPI.Time.DeltaTime;
             var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
             var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position;
-            var fallbackProjectilePrefab = SystemAPI.HasSingleton<AbilitySpawnData>()
-                ? SystemAPI.GetSingleton<AbilitySpawnData>().EnemyProjectilePrefab
-                : Entity.Null;
             var ecbSystem = SystemAPI.GetSingleton<BeginInitializationEntityCommandBufferSystem.Singleton>();
             var ecb = ecbSystem.CreateCommandBuffer(state.WorldUnmanaged);
             var pooledProjectiles = _pooledEnemyProjectileQuery.ToEntityArray(Allocator.Temp);
@@ -58,9 +55,7 @@ namespace TMG.Survivors
                 }
 
                 aerialState.ValueRW.ShootTimer -= deltaTime;
-                var projectilePrefab = aerialData.ProjectilePrefab != Entity.Null
-                    ? aerialData.ProjectilePrefab
-                    : fallbackProjectilePrefab;
+                var projectilePrefab = aerialData.ProjectilePrefab;
                 if (aerialState.ValueRO.ShootTimer > 0f ||
                     projectilePrefab == Entity.Null ||
                     !state.EntityManager.HasComponent<PlasmaBlastData>(projectilePrefab))

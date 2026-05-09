@@ -53,9 +53,13 @@ namespace TMG.Survivors
 
     public partial struct MovePlasmaBlastSystem : ISystem
     {
+        private const float ProjectileRadius = 0.5f;
+        private const float PlayerHitRadius = 0.6f;
+
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<PhysicsWorldSingleton>();
+            state.RequireForUpdate<PlayerTag>();
         }
 
         public void OnUpdate(ref SystemState state)
@@ -71,20 +75,24 @@ namespace TMG.Survivors
             }
 
             var physicsWorld = SystemAPI.GetSingleton<PhysicsWorldSingleton>().PhysicsWorld;
+            var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
+            var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position;
             var ecb = new EntityCommandBuffer(Allocator.TempJob);
 
-            var raycastJob = new PlasmaBlastRaycastMoveJob
+            var colliderCastJob = new PlasmaBlastColliderCastMoveJob
             {
                 DeltaTime = deltaTime,
+                PlayerEntity = playerEntity,
+                PlayerPosition = playerPosition,
+                EnemyProjectileHitRadius = ProjectileRadius + PlayerHitRadius,
                 PhysicsWorld = physicsWorld,
                 EnemyProjectileLookup = SystemAPI.GetComponentLookup<EnemyProjectileTag>(true),
                 EnemyLookup = SystemAPI.GetComponentLookup<EnemyTag>(true),
-                PlayerLookup = SystemAPI.GetComponentLookup<PlayerTag>(true),
                 DestroyEntityLookup = SystemAPI.GetComponentLookup<DestroyEntityFlag>(true),
                 CommandBuffer = ecb.AsParallelWriter()
             };
 
-            state.Dependency = raycastJob.ScheduleParallel(state.Dependency);
+            state.Dependency = colliderCastJob.ScheduleParallel(state.Dependency);
             state.Dependency.Complete();
 
             ecb.Playback(state.EntityManager);
@@ -93,45 +101,65 @@ namespace TMG.Survivors
     }
 
     [BurstCompile]
-    public partial struct PlasmaBlastRaycastMoveJob : IJobEntity
+    public partial struct PlasmaBlastColliderCastMoveJob : IJobEntity
     {
+        private const float OverlapTolerance = 0.01f;
+
         [ReadOnly] public PhysicsWorld PhysicsWorld;
         [ReadOnly] public ComponentLookup<EnemyProjectileTag> EnemyProjectileLookup;
         [ReadOnly] public ComponentLookup<EnemyTag> EnemyLookup;
-        [ReadOnly] public ComponentLookup<PlayerTag> PlayerLookup;
         [ReadOnly] public ComponentLookup<DestroyEntityFlag> DestroyEntityLookup;
         public EntityCommandBuffer.ParallelWriter CommandBuffer;
         public float DeltaTime;
+        public Entity PlayerEntity;
+        public float3 PlayerPosition;
+        public float EnemyProjectileHitRadius;
 
         private void Execute(
             [EntityIndexInQuery] int sortKey,
             Entity entity,
             ref LocalTransform transform,
+            in PhysicsCollider collider,
             in PlasmaBlastData data)
         {
             var start = transform.Position;
             var end = start + transform.Right() * data.MoveSpeed * DeltaTime;
             var isEnemyProjectile = EnemyProjectileLookup.HasComponent(entity);
-            var target = FindCurrentOverlapTarget(start, isEnemyProjectile);
-            if (target != Entity.Null)
+            if (isEnemyProjectile &&
+                TryGetSegmentCircleHit(start.xy, end.xy, PlayerPosition.xy, EnemyProjectileHitRadius, out var hitPoint))
             {
-                ApplyHit(sortKey, entity, target, data.AttackDamage, start, ref transform);
+                ApplyHit(sortKey, entity, PlayerEntity, data.AttackDamage, new float3(hitPoint, start.z), ref transform);
                 return;
             }
 
-            var raycastInput = new RaycastInput
+            if (isEnemyProjectile)
             {
-                Start = start,
-                End = end,
-                Filter = new CollisionFilter
-                {
-                    BelongsTo = uint.MaxValue,
-                    CollidesWith = uint.MaxValue
-                }
-            };
+                transform.Position = end;
+                return;
+            }
 
-            if (PhysicsWorld.CastRay(raycastInput, out var hit) && IsValidTarget(hit.Entity, isEnemyProjectile))
+            var targetCollector = CreateTargetCollector(entity);
+
+            var overlapInput = new ColliderDistanceInput(
+                collider.Value,
+                OverlapTolerance,
+                new RigidTransform(transform.Rotation, start),
+                transform.Scale);
+
+            if (PhysicsWorld.CalculateDistance(overlapInput, ref targetCollector) &&
+                targetCollector.NumHits > 0)
             {
+                ApplyHit(sortKey, entity, targetCollector.DistanceHit.Entity, data.AttackDamage, start, ref transform);
+                return;
+            }
+
+            targetCollector = CreateTargetCollector(entity);
+            var castInput = new ColliderCastInput(collider.Value, start, end, transform.Rotation, transform.Scale);
+
+            if (PhysicsWorld.CastCollider(castInput, ref targetCollector) &&
+                targetCollector.NumHits > 0)
+            {
+                var hit = targetCollector.ColliderCastHit;
                 ApplyHit(sortKey, entity, hit.Entity, data.AttackDamage, hit.Position, ref transform);
                 return;
             }
@@ -139,25 +167,57 @@ namespace TMG.Survivors
             transform.Position = end;
         }
 
-        private Entity FindCurrentOverlapTarget(float3 position, bool isEnemyProjectile)
+        private static bool TryGetSegmentCircleHit(
+            float2 start,
+            float2 end,
+            float2 center,
+            float radius,
+            out float2 hitPoint)
         {
-            var overlapInput = new PointDistanceInput
+            var segment = end - start;
+            var segmentLengthSq = math.lengthsq(segment);
+            if (segmentLengthSq <= float.Epsilon)
             {
-                Position = position,
-                MaxDistance = 0.05f,
-                Filter = new CollisionFilter
-                {
-                    BelongsTo = uint.MaxValue,
-                    CollidesWith = uint.MaxValue
-                }
-            };
-
-            if (!PhysicsWorld.CalculateDistance(overlapInput, out var hit))
-            {
-                return Entity.Null;
+                hitPoint = start;
+                return math.distancesq(start, center) <= radius * radius;
             }
 
-            return IsValidTarget(hit.Entity, isEnemyProjectile) ? hit.Entity : Entity.Null;
+            var centerToStart = start - center;
+            var b = 2f * math.dot(centerToStart, segment);
+            var c = math.lengthsq(centerToStart) - radius * radius;
+            if (c <= 0f)
+            {
+                hitPoint = start;
+                return true;
+            }
+
+            var discriminant = b * b - 4f * segmentLengthSq * c;
+            if (discriminant < 0f)
+            {
+                hitPoint = default;
+                return false;
+            }
+
+            var t = (-b - math.sqrt(discriminant)) / (2f * segmentLengthSq);
+            if (t < 0f || t > 1f)
+            {
+                hitPoint = default;
+                return false;
+            }
+
+            hitPoint = start + segment * t;
+            return true;
+        }
+
+        private TargetHitCollector CreateTargetCollector(Entity projectileEntity)
+        {
+            return new TargetHitCollector
+            {
+                MaxFraction = 1f,
+                ProjectileEntity = projectileEntity,
+                EnemyLookup = EnemyLookup,
+                DestroyEntityLookup = DestroyEntityLookup
+            };
         }
 
         private void ApplyHit(
@@ -176,16 +236,57 @@ namespace TMG.Survivors
             CommandBuffer.SetComponentEnabled<DestroyEntityFlag>(sortKey, projectileEntity, true);
         }
 
-        private bool IsValidTarget(Entity hitEntity, bool isEnemyProjectile)
+    }
+
+    public struct TargetHitCollector :
+        ICollector<ColliderCastHit>,
+        ICollector<DistanceHit>
+    {
+        [ReadOnly] public ComponentLookup<EnemyTag> EnemyLookup;
+        [ReadOnly] public ComponentLookup<DestroyEntityFlag> DestroyEntityLookup;
+
+        public Entity ProjectileEntity;
+        public float MaxFraction { get; set; }
+        public int NumHits { get; private set; }
+        public ColliderCastHit ColliderCastHit { get; private set; }
+        public DistanceHit DistanceHit { get; private set; }
+        public bool EarlyOutOnFirstHit => false;
+
+        public bool AddHit(ColliderCastHit hit)
         {
-            if (!DestroyEntityLookup.HasComponent(hitEntity))
+            if (!IsValidTarget(hit.Entity) || hit.Fraction > MaxFraction)
             {
                 return false;
             }
 
-            return isEnemyProjectile
-                ? PlayerLookup.HasComponent(hitEntity)
-                : EnemyLookup.HasComponent(hitEntity);
+            MaxFraction = hit.Fraction;
+            ColliderCastHit = hit;
+            NumHits = 1;
+            return true;
+        }
+
+        public bool AddHit(DistanceHit hit)
+        {
+            if (!IsValidTarget(hit.Entity) || hit.Fraction > MaxFraction)
+            {
+                return false;
+            }
+
+            MaxFraction = hit.Fraction;
+            DistanceHit = hit;
+            NumHits = 1;
+            return true;
+        }
+
+        private bool IsValidTarget(Entity hitEntity)
+        {
+            if (hitEntity == ProjectileEntity ||
+                !DestroyEntityLookup.HasComponent(hitEntity))
+            {
+                return false;
+            }
+
+            return EnemyLookup.HasComponent(hitEntity);
         }
     }
 }
