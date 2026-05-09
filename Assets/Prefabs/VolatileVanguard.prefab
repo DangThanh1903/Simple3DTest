@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 680924004551344385}
   - component: {fileID: 1592895967494112059}
   - component: {fileID: 8270555849195484201}
+  - component: {fileID: 9004001}
   m_Layer: 7
   m_Name: VolatileVanguard
   m_TagString: Untagged
@@ -168,10 +169,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f2d26bfd5a3b4c268ef09ae83c36ee79, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  BehaviorType: 3
-  AttackDamage: 1000000
-  CooldownTime: 0.1
   GemPrefab: {fileID: 4075428313511067202, guid: 1ef86984360a3aa4096170e8c558319e, type: 3}
-  VolatileCountdownTime: 5
-  VolatileExplosionRadius: 3
-  VolatileExplosionDamage: 25
+--- !u!114 &9004001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8785729372594503702}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1110000000000000000000000000006, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  CountdownTime: 5
+  ExplosionRadius: 3
+  ExplosionDamage: 25

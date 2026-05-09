@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 5834903529519736373}
   - component: {fileID: 5558314235379467245}
   - component: {fileID: 1170980920484656898}
+  - component: {fileID: 9005001}
   m_Layer: 7
   m_Name: HeavyLeaper
   m_TagString: Untagged
@@ -168,11 +169,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f2d26bfd5a3b4c268ef09ae83c36ee79, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  BehaviorType: 4
-  AttackDamage: 1000000
-  CooldownTime: 0.1
   GemPrefab: {fileID: 4075428313511067202, guid: 1ef86984360a3aa4096170e8c558319e, type: 3}
-  HeavyLeapInterval: 1.5
-  HeavyLeapDuration: 0.65
-  HeavySlamRadius: 3.5
-  HeavySlamDamage: 20
+--- !u!114 &9005001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7600937568669482155}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1110000000000000000000000000007, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  LeapInterval: 1.5
+  LeapDuration: 0.65
+  SlamRadius: 3.5
+  SlamDamage: 20

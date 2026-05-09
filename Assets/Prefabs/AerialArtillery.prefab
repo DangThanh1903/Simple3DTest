@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 176304383203094892}
   - component: {fileID: 1791244743551791236}
   - component: {fileID: 400095405640551466}
+  - component: {fileID: 9003001}
   m_Layer: 7
   m_Name: AerialArtillery
   m_TagString: Untagged
@@ -168,11 +169,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f2d26bfd5a3b4c268ef09ae83c36ee79, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  BehaviorType: 2
-  AttackDamage: 1000000
-  CooldownTime: 0.1
   GemPrefab: {fileID: 4075428313511067202, guid: 1ef86984360a3aa4096170e8c558319e, type: 3}
-  AerialProjectilePrefab: {fileID: 42743470278448070, guid: 5abad809c221eec458f19dd5aa3b87f6, type: 3}
-  AerialMinimumDistance: 7
-  AerialPreferredDistance: 10
-  AerialShootCooldown: 1.25
+--- !u!114 &9003001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4679082440980975953}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1110000000000000000000000000005, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ProjectilePrefab: {fileID: 42743470278448070, guid: 5abad809c221eec458f19dd5aa3b87f6, type: 3}
+  MinimumDistance: 7
+  PreferredDistance: 10
+  ShootCooldown: 1.25
