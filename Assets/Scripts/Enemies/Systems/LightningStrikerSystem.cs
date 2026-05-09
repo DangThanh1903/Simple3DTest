@@ -9,6 +9,7 @@ namespace TMG.Survivors
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<PlayerTag>();
+            state.RequireForUpdate<BeginInitializationEntityCommandBufferSystem.Singleton>();
         }
 
         public void OnUpdate(ref SystemState state)
@@ -17,6 +18,8 @@ namespace TMG.Survivors
             var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
             var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position;
             var playerDamageBuffer = SystemAPI.GetBuffer<DamageThisFrame>(playerEntity);
+            var ecbSystem = SystemAPI.GetSingleton<BeginInitializationEntityCommandBufferSystem.Singleton>();
+            var ecb = ecbSystem.CreateCommandBuffer(state.WorldUnmanaged);
 
             foreach (var (transform, data, lightningState, entity) in SystemAPI
                          .Query<RefRW<LocalTransform>, LightningStrikerData, RefRW<LightningStrikerState>>()
@@ -44,6 +47,12 @@ namespace TMG.Survivors
                     lightningState.ValueRW.Phase = LightningStrikerPhase.Locking;
                     lightningState.ValueRW.Timer = data.LockDuration;
                     lightningState.ValueRW.LockedTargetPosition = playerPosition;
+                    SpawnTimedVisual(
+                        ecb,
+                        data.WarningPrefab,
+                        playerPosition,
+                        data.StrikeRadius * 2f,
+                        data.LockDuration);
                     continue;
                 }
 
@@ -58,6 +67,12 @@ namespace TMG.Survivors
 
                     lightningState.ValueRW.Phase = LightningStrikerPhase.Striking;
                     lightningState.ValueRW.Timer = 0.15f;
+                    SpawnTimedVisual(
+                        ecb,
+                        data.StrikeFlashPrefab,
+                        lightningState.ValueRO.LockedTargetPosition,
+                        data.StrikeRadius * 2f,
+                        data.StrikeFlashDuration);
 
                     var distanceToLockedTargetSq = math.distancesq(playerPosition.xy, lightningState.ValueRO.LockedTargetPosition.xy);
                     if (distanceToLockedTargetSq <= data.StrikeRadius * data.StrikeRadius)
@@ -78,6 +93,28 @@ namespace TMG.Survivors
                     SystemAPI.SetComponentEnabled<DestroyEntityFlag>(entity, true);
                 }
             }
+        }
+
+        private void SpawnTimedVisual(
+            EntityCommandBuffer ecb,
+            Entity prefab,
+            float3 position,
+            float scale,
+            float lifetime)
+        {
+            if (prefab == Entity.Null)
+            {
+                return;
+            }
+
+            var entity = ecb.Instantiate(prefab);
+            var transform = LocalTransform.FromPosition(position);
+            transform.Scale = scale;
+            ecb.SetComponent(entity, transform);
+            ecb.AddComponent(entity, new TimedVisualEffect
+            {
+                RemainingTime = lifetime
+            });
         }
     }
 }

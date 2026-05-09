@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 4078053292692356569}
   - component: {fileID: 2955102995012804144}
   - component: {fileID: 2139548089038020924}
+  - component: {fileID: 9018001}
   - component: {fileID: 9008001}
   - component: {fileID: 9008002}
   m_Layer: 7
@@ -164,6 +165,18 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f2d26bfd5a3b4c268ef09ae83c36ee79, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &9018001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5545208887308343624}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1110000000000000000000000000020, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   GemPrefab: {fileID: 4075428313511067202, guid: 1ef86984360a3aa4096170e8c558319e, type: 3}

@@ -113,11 +113,19 @@ namespace TMG.Survivors
 
     public struct LightningStrikerData : IComponentData
     {
+        public Entity WarningPrefab;
+        public Entity StrikeFlashPrefab;
         public float FlyDuration;
         public float FlySpeed;
         public float LockDuration;
+        public float StrikeFlashDuration;
         public float StrikeRadius;
         public int StrikeDamage;
+    }
+
+    public struct TimedVisualEffect : IComponentData
+    {
+        public float RemainingTime;
     }
 
     public struct LightningStrikerState : IComponentData

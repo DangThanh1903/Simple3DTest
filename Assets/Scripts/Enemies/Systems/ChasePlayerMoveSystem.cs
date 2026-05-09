@@ -18,6 +18,8 @@ namespace TMG.Survivors
         private const float SpatialHashCellSize = 1.75f;
         private const float SeparationRadius = 1.25f;
         private const float SeparationWeight = 1.35f;
+        private const float DirectionSharpness = 10f;
+        private const float MinSeparationDistanceSq = 0.25f;
 
         public void OnCreate(ref SystemState state)
         {
@@ -110,7 +112,10 @@ namespace TMG.Survivors
                 PlayerPosition = playerPosition,
                 CellSize = SpatialHashCellSize,
                 SeparationRadius = SeparationRadius,
-                SeparationWeight = SeparationWeight
+                SeparationWeight = SeparationWeight,
+                DirectionSharpness = DirectionSharpness,
+                DeltaTime = SystemAPI.Time.DeltaTime,
+                MinSeparationDistanceSq = MinSeparationDistanceSq
             };
 
             state.Dependency = moveJob.Schedule(chaseCount, 64, sortHandle);
@@ -182,18 +187,28 @@ namespace TMG.Survivors
         public float CellSize;
         public float SeparationRadius;
         public float SeparationWeight;
+        public float DirectionSharpness;
+        public float DeltaTime;
+        public float MinSeparationDistanceSq;
 
         public void Execute(int index)
         {
+            var entity = Entities[index];
             var position = Positions[index];
             var toPlayer = PlayerPosition - position;
             var chaseDirection = math.lengthsq(toPlayer) > 0.0001f ? math.normalize(toPlayer) : float2.zero;
             var separation = GetSeparation(index, position);
             var desiredDirection = chaseDirection + separation * SeparationWeight;
+            var targetDirection = math.lengthsq(desiredDirection) > 0.0001f ? math.normalize(desiredDirection) : float2.zero;
+            var currentDirection = DirectionLookup[entity].Value;
+            var blend = math.saturate(DirectionSharpness * DeltaTime);
+            var smoothedDirection = math.lengthsq(currentDirection) > 0.0001f
+                ? math.lerp(currentDirection, targetDirection, blend)
+                : targetDirection;
 
-            DirectionLookup[Entities[index]] = new CharacterMoveDirection
+            DirectionLookup[entity] = new CharacterMoveDirection
             {
-                Value = math.lengthsq(desiredDirection) > 0.0001f ? math.normalize(desiredDirection) : float2.zero
+                Value = math.lengthsq(smoothedDirection) > 0.0001f ? math.normalize(smoothedDirection) : float2.zero
             };
         }
 
@@ -229,7 +244,7 @@ namespace TMG.Survivors
                         var distanceSq = math.lengthsq(awayFromNeighbor);
                         if (distanceSq > 0.0001f && distanceSq < radiusSq)
                         {
-                            separation += awayFromNeighbor / distanceSq;
+                            separation += awayFromNeighbor / math.max(distanceSq, MinSeparationDistanceSq);
                         }
                     }
                 }
