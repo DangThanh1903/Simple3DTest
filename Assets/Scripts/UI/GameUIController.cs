@@ -110,12 +110,12 @@ namespace TMG.Survivors
             rectTransform.anchorMin = new Vector2(0f, 1f);
             rectTransform.anchorMax = new Vector2(0f, 1f);
             rectTransform.pivot = new Vector2(0f, 1f);
-            rectTransform.anchoredPosition = new Vector2(20f, -70f);
-            rectTransform.sizeDelta = new Vector2(260f, 110f);
+            rectTransform.anchoredPosition = new Vector2(24f, -110f);
+            rectTransform.sizeDelta = new Vector2(520f, 240f);
 
             _entityCounterText = counterObject.GetComponent<TextMeshProUGUI>();
             _entityCounterText.font = _gemsCollectedText.font;
-            _entityCounterText.fontSize = 18f;
+            _entityCounterText.fontSize = 42f;
             _entityCounterText.color = Color.white;
             _entityCounterText.alignment = TextAlignmentOptions.TopLeft;
             _entityCounterText.raycastTarget = false;
