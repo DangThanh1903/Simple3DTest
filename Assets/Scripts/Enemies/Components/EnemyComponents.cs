@@ -24,6 +24,8 @@ namespace TMG.Survivors
     {
         public float Lifetime;
         public float MoveSpeed;
+        public float ContactRadius;
+        public float StunDuration;
         public float KnockbackSpeed;
         public float KnockbackDuration;
     }
@@ -32,6 +34,7 @@ namespace TMG.Survivors
     {
         public float RemainingTime;
         public float2 Direction;
+        public bool HasHitPlayer;
     }
 
     public struct PlayerKnockback : IComponentData
@@ -93,6 +96,8 @@ namespace TMG.Survivors
 
     public struct StasisOverlordData : IComponentData
     {
+        public float MinimumDistance;
+        public float PreferredDistance;
         public float FreezeRange;
         public float FreezeDuration;
         public float CastCooldown;

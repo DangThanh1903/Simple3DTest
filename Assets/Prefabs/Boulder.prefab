@@ -127,5 +127,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   Lifetime: 5
   MoveSpeed: 12
-  KnockbackSpeed: 14
-  KnockbackDuration: 0.35
+  ContactRadius: 1.25
+  StunDuration: 1
+  KnockbackSpeed: 7
+  KnockbackDuration: 0.2

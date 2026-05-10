@@ -98,16 +98,6 @@ namespace TMG.Survivors
             foreach (var (velocity, facingDirection, direction, speed, entity) in SystemAPI.Query<RefRW<PhysicsVelocity>, RefRW<FacingDirectionOverride>, CharacterMoveDirection, CharacterMoveSpeed>().WithEntityAccess())
             {
                 var moveStep2d = direction.Value * speed.Value;
-                if (SystemAPI.HasComponent<PlayerKnockback>(entity))
-                {
-                    var knockback = SystemAPI.GetComponentRW<PlayerKnockback>(entity);
-                    if (knockback.ValueRO.RemainingTime > 0f)
-                    {
-                        moveStep2d = knockback.ValueRO.Velocity;
-                        knockback.ValueRW.RemainingTime -= deltaTime;
-                    }
-                }
-
                 if (SystemAPI.HasComponent<PlayerFreeze>(entity))
                 {
                     var freeze = SystemAPI.GetComponentRW<PlayerFreeze>(entity);
@@ -115,6 +105,16 @@ namespace TMG.Survivors
                     {
                         moveStep2d = float2.zero;
                         freeze.ValueRW.RemainingTime -= deltaTime;
+                    }
+                }
+
+                if (SystemAPI.HasComponent<PlayerKnockback>(entity))
+                {
+                    var knockback = SystemAPI.GetComponentRW<PlayerKnockback>(entity);
+                    if (knockback.ValueRO.RemainingTime > 0f)
+                    {
+                        moveStep2d = knockback.ValueRO.Velocity;
+                        knockback.ValueRW.RemainingTime -= deltaTime;
                     }
                 }
 

@@ -10,9 +10,18 @@ namespace TMG.Survivors
 {
     public partial struct RollingHazardMoveSystem : ISystem
     {
+        public void OnCreate(ref SystemState state)
+        {
+            state.RequireForUpdate<PlayerTag>();
+        }
+
         public void OnUpdate(ref SystemState state)
         {
             var deltaTime = SystemAPI.Time.DeltaTime;
+            var playerEntity = SystemAPI.GetSingletonEntity<PlayerTag>();
+            var playerPosition = SystemAPI.GetComponent<LocalTransform>(playerEntity).Position;
+            var playerKnockback = SystemAPI.GetComponentRW<PlayerKnockback>(playerEntity);
+            var playerFreeze = SystemAPI.GetComponentRW<PlayerFreeze>(playerEntity);
 
             foreach (var (transform, data, hazardState, entity) in SystemAPI
                          .Query<RefRW<LocalTransform>, RollingHazardData, RefRW<RollingHazardState>>()
@@ -20,7 +29,28 @@ namespace TMG.Survivors
                          .WithPresent<DestroyEntityFlag>()
                          .WithEntityAccess())
             {
-                transform.ValueRW.Position += new float3(hazardState.ValueRO.Direction * data.MoveSpeed * deltaTime, 0f);
+                var startPosition = transform.ValueRO.Position;
+                var direction = math.lengthsq(hazardState.ValueRO.Direction) > 0.0001f
+                    ? math.normalize(hazardState.ValueRO.Direction)
+                    : new float2(1f, 0f);
+                var endPosition = startPosition + new float3(direction * data.MoveSpeed * deltaTime, 0f);
+
+                if (!hazardState.ValueRO.HasHitPlayer && TryGetSegmentCircleHit(
+                        startPosition.xy,
+                        endPosition.xy,
+                        playerPosition.xy,
+                        data.ContactRadius))
+                {
+                    hazardState.ValueRW.HasHitPlayer = true;
+                    playerFreeze.ValueRW.RemainingTime = math.max(playerFreeze.ValueRO.RemainingTime, data.StunDuration);
+                    playerKnockback.ValueRW = new PlayerKnockback
+                    {
+                        RemainingTime = data.KnockbackDuration,
+                        Velocity = direction * data.KnockbackSpeed
+                    };
+                }
+
+                transform.ValueRW.Position = endPosition;
                 transform.ValueRW.Rotation = math.mul(transform.ValueRO.Rotation, quaternion.RotateZ(-data.MoveSpeed * deltaTime));
 
                 hazardState.ValueRW.RemainingTime -= deltaTime;
@@ -29,6 +59,38 @@ namespace TMG.Survivors
                     SystemAPI.SetComponentEnabled<DestroyEntityFlag>(entity, true);
                 }
             }
+        }
+
+        private static bool TryGetSegmentCircleHit(
+            float2 start,
+            float2 end,
+            float2 center,
+            float radius)
+        {
+            var segment = end - start;
+            var segmentLengthSq = math.lengthsq(segment);
+            var radiusSq = radius * radius;
+            if (segmentLengthSq <= float.Epsilon)
+            {
+                return math.distancesq(start, center) <= radiusSq;
+            }
+
+            var centerToStart = start - center;
+            var b = 2f * math.dot(centerToStart, segment);
+            var c = math.lengthsq(centerToStart) - radiusSq;
+            if (c <= 0f)
+            {
+                return true;
+            }
+
+            var discriminant = b * b - 4f * segmentLengthSq * c;
+            if (discriminant < 0f)
+            {
+                return false;
+            }
+
+            var t = (-b - math.sqrt(discriminant)) / (2f * segmentLengthSq);
+            return t >= 0f && t <= 1f;
         }
     }
 
@@ -65,69 +127,4 @@ namespace TMG.Survivors
         }
     }
 
-    [UpdateInGroup(typeof(PhysicsSystemGroup))]
-    [UpdateAfter(typeof(PhysicsSimulationGroup))]
-    [UpdateBefore(typeof(AfterPhysicsSystemGroup))]
-    public partial struct RollingHazardKnockbackSystem : ISystem
-    {
-        public void OnCreate(ref SystemState state)
-        {
-            state.RequireForUpdate<SimulationSingleton>();
-        }
-
-        public void OnUpdate(ref SystemState state)
-        {
-            var knockbackJob = new RollingHazardKnockbackJob
-            {
-                HazardLookup = SystemAPI.GetComponentLookup<RollingHazardData>(true),
-                HazardStateLookup = SystemAPI.GetComponentLookup<RollingHazardState>(true),
-                PlayerLookup = SystemAPI.GetComponentLookup<PlayerTag>(true),
-                PlayerKnockbackLookup = SystemAPI.GetComponentLookup<PlayerKnockback>()
-            };
-
-            var simulationSingleton = SystemAPI.GetSingleton<SimulationSingleton>();
-            state.Dependency = knockbackJob.Schedule(simulationSingleton, state.Dependency);
-        }
-    }
-
-    public struct RollingHazardKnockbackJob : ICollisionEventsJob
-    {
-        [ReadOnly] public ComponentLookup<RollingHazardData> HazardLookup;
-        [ReadOnly] public ComponentLookup<RollingHazardState> HazardStateLookup;
-        [ReadOnly] public ComponentLookup<PlayerTag> PlayerLookup;
-        public ComponentLookup<PlayerKnockback> PlayerKnockbackLookup;
-
-        public void Execute(CollisionEvent collisionEvent)
-        {
-            Entity hazardEntity;
-            Entity playerEntity;
-
-            if (HazardLookup.HasComponent(collisionEvent.EntityA) && PlayerLookup.HasComponent(collisionEvent.EntityB))
-            {
-                hazardEntity = collisionEvent.EntityA;
-                playerEntity = collisionEvent.EntityB;
-            }
-            else if (HazardLookup.HasComponent(collisionEvent.EntityB) && PlayerLookup.HasComponent(collisionEvent.EntityA))
-            {
-                hazardEntity = collisionEvent.EntityB;
-                playerEntity = collisionEvent.EntityA;
-            }
-            else
-            {
-                return;
-            }
-
-            var hazardData = HazardLookup[hazardEntity];
-            var hazardState = HazardStateLookup[hazardEntity];
-            var knockbackDirection = math.lengthsq(hazardState.Direction) > 0.0001f
-                ? math.normalize(hazardState.Direction)
-                : new float2(1f, 0f);
-
-            PlayerKnockbackLookup[playerEntity] = new PlayerKnockback
-            {
-                RemainingTime = hazardData.KnockbackDuration,
-                Velocity = knockbackDirection * hazardData.KnockbackSpeed
-            };
-        }
-    }
 }
